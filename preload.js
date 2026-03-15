@@ -7,9 +7,19 @@ contextBridge.exposeInMainWorld('pkgApi', {
   openExternal:        (url)                            => ipcRenderer.invoke('open-external', url),
   copyToClipboard:     (text)                           => ipcRenderer.invoke('clipboard-write', text),
   getAllDrives:         ()                               => ipcRenderer.invoke('get-all-drives'),
+  getAppPath:          ()                               => ipcRenderer.invoke('get-app-path'),
 
   // ── Network helpers ─────────────────────────────────────────────────────────
   getLocalIp:          ()                               => ipcRenderer.invoke('get-local-ip'),
+  getLogPath:          ()                               => ipcRenderer.invoke('get-log-path'),
+  openLog:             ()                               => ipcRenderer.invoke('open-log'),
+  openLogFolder:       ()                               => ipcRenderer.invoke('open-log-folder'),
+  // ── Auto-updater ──────────────────────────────────────────────────────────
+  checkForUpdates:     ()                               => ipcRenderer.invoke('update-check'),
+  downloadUpdate:      ()                               => ipcRenderer.invoke('update-download'),
+  installUpdate:       ()                               => ipcRenderer.invoke('update-install'),
+  onUpdateStatus:      (cb)                             => ipcRenderer.on('update-status', (_e, d) => cb(d)),
+  offUpdateStatus:     ()                               => ipcRenderer.removeAllListeners('update-status'),
   discoverPs4:         ()                               => ipcRenderer.invoke('discover-ps4'),
   testPs4Conn:         (ip, port)                        => ipcRenderer.invoke('test-ps4-conn', ip, port),
 
@@ -20,6 +30,7 @@ contextBridge.exposeInMainWorld('pkgApi', {
   // ── FTP ─────────────────────────────────────────────────────────────────────
   ftpScanPkgs:         (cfg)                            => ipcRenderer.invoke('ftp-scan-pkgs', cfg),
   ftpTestConn:         (cfg)                            => ipcRenderer.invoke('ftp-test-conn', cfg),
+  ftpScanInstalled:    (cfg)                            => ipcRenderer.invoke('ftp-scan-installed', cfg),
 
   // ── File ops ─────────────────────────────────────────────────────────────────
   deletePkgs:          (items)                          => ipcRenderer.invoke('delete-pkgs', items),

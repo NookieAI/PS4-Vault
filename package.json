@@ -1,27 +1,32 @@
 {
   "name": "ps4-vault",
-  "version": "1.0.0",
-  "description": "PS4 PKG library manager — scan, organise, rename and transfer .pkg files",
+  "version": "1.3.0",
+  "description": "PS4 PKG library manager \u2014 scan, organise, rename and transfer .pkg files",
   "main": "main.js",
-  "author": "PS4 Vault",
+  "author": {
+    "name": "Nookie",
+    "email": "your@email.com"
+  },
   "license": "MIT",
   "scripts": {
-    "start":           "electron .",
-    "build":           "electron-builder --win portable",
+    "start": "electron .",
+    "build": "electron-builder --win portable",
     "build:installer": "electron-builder --win nsis",
-    "build:all":       "electron-builder --win --mac --linux"
+    "build:all": "electron-builder --win --mac --linux"
   },
-  "dependencies": {},
+  "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "electron-updater": "^6.1.7"
+  },
   "devDependencies": {
-    "electron":         "^29.0.0",
+    "electron": "^29.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId":       "com.ps4vault.app",
+    "appId": "com.ps4vault.app",
     "productName": "PS4 Vault",
-    "copyright":   "Copyright © 2026 PS4 Vault",
-    "asar":        true,
-
+    "copyright": "Copyright \u00a9 2026 PS4 Vault",
+    "asar": true,
     "files": [
       "main.js",
       "preload.js",
@@ -29,43 +34,60 @@
       "index.html",
       "assets/**/*"
     ],
-
     "win": {
       "target": [
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico",
       "artifactName": "${productName}-${version}-portable.exe"
     },
-
     "portable": {
       "requestExecutionLevel": "user",
-      "unpackDirName": "ps4vault"
+      "artifactName": "${productName}-${version}-portable.exe"
     },
-
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon":   "assets/icon.ico",
+      "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "artifactName":    "${productName}-${version}-setup.exe"
+      "artifactName": "${productName}-${version}-setup.exe",
+      "shortcutName": "PS4 Vault",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
-
     "mac": {
-      "target":   "dmg",
-      "icon":     "assets/icon.icns",
+      "target": "dmg",
+      "icon": "assets/icon.icns",
       "category": "public.app-category.utilities"
     },
-
     "linux": {
-      "target":   "AppImage",
-      "icon":     "assets/icon.png",
+      "target": "AppImage",
+      "icon": "assets/icon.png",
       "category": "Utility"
     },
-
     "directories": {
-      "output":          "dist",
-      "buildResources":  "assets"
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "YOUR_GITHUB_USERNAME",
+      "repo": "ps4-vault",
+      "releaseType": "release"
+    },
+    "extraMetadata": {
+      "main": "main.js"
     }
   }
 }

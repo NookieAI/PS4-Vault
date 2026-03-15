@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PS4 Vault</title>
+  <title>PS4 Vault v1.3.0</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:;">
+  <!-- Inter + JetBrains Mono from Google Fonts (self-contained, no tracking) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' file: data: blob:; font-src 'self' https://fonts.gstatic.com;">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg:                #0a0c10;
@@ -30,7 +37,7 @@
       --thumb-size:        60px;
       --cover-col-width:   80px;
       --thumb-radius:      8px;
-      --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
       --radius-sm: 5px;
       --radius:    7px;
       --radius-lg: 10px;
@@ -58,8 +65,11 @@
       height: 100%; margin: 0;
       background: var(--bg); color: var(--text);
       overflow: hidden;
-      font-family: var(--font); font-size: 13px; line-height: 1.5;
+      font-family: var(--font); font-size: 13px; line-height: 1.45;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      letter-spacing: -0.01em;
+      font-feature-settings: 'kern' 1, 'liga' 1;
       transition: background .2s, color .2s;
     }
     *, *::before, *::after { box-sizing: border-box; }
@@ -67,8 +77,8 @@
     /* ── Layout shell ── */
     .container {
       height: 100vh; display: flex; flex-direction: column;
-      gap: 8px;
-      padding: 10px clamp(6px, 1vw, 18px);
+      gap: 5px;
+      padding: 6px clamp(6px, 1vw, 14px);
       width: 100%; overflow: hidden;
     }
 
@@ -76,20 +86,20 @@
     .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
     .brand  { display: flex; gap: 10px; align-items: center; }
     .logo-wrap {
-      height: 48px; width: auto; max-width: 200px;
+      height: 36px; width: auto; max-width: 160px;
       display: flex; align-items: center; justify-content: center;
-      overflow: hidden; border-radius: 8px; background: #0c1a2e;
-      flex: 0 0 auto; margin-right: 6px; padding: 0 4px;
+      overflow: hidden; border-radius: 6px; background: #0c1a2e;
+      flex: 0 0 auto; margin-right: 4px; padding: 0 3px;
     }
     .brand img.brand-logo {
-      height: 48px; width: auto; max-width: 200px;
-      object-fit: contain; border-radius: 8px;
+      height: 36px; width: auto; max-width: 160px;
+      object-fit: contain; border-radius: 6px;
       border: 1px solid rgba(255,255,255,0.04);
       box-shadow: 0 6px 18px rgba(0,0,0,0.45); background: #0c1a2e;
       display: block;
     }
-    .brand .meta .app-title  { font-weight: 700; font-size: 14px; color: var(--title); line-height: 1; letter-spacing: -0.02em; }
-    .brand .meta .app-sub    { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .brand .meta .app-title  { font-weight: 800; font-size: 14px; color: var(--title); line-height: 1; letter-spacing: -0.03em; }
+    .brand .meta .app-sub    { font-size: 10px; color: var(--muted); margin-top: 3px; letter-spacing: .02em; }
     .topbar-right { display: flex; gap: 6px; align-items: center; }
     .made-by {
       font-size: 11px; color: var(--muted); padding: 5px 8px;
@@ -109,16 +119,16 @@
     .controls-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 6px;
       flex-shrink: 0;
     }
     .ctrl-panel {
       background: var(--surface); border: 1px solid var(--card-border);
-      border-radius: var(--radius-lg); padding: 10px 12px;
-      display: flex; flex-direction: column; gap: 8px;
+      border-radius: var(--radius-lg); padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 5px;
     }
     .ctrl-panel-label {
-      font-size: 10px; font-weight: 700; letter-spacing: .07em;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .07em;
       text-transform: uppercase; color: var(--muted); flex-shrink: 0;
     }
 
@@ -141,21 +151,24 @@
 
     /* ── Recent path chips ── */
     .recent-chips {
-      display: flex; gap: 4px; flex-wrap: wrap; min-height: 0;
+      display: flex; gap: 3px; flex-wrap: nowrap; min-height: 0;
+      overflow-x: auto; overflow-y: hidden;
+      scrollbar-width: none; /* hide scrollbar but still scrollable */
     }
+    .recent-chips::-webkit-scrollbar { display: none; }
     .recent-chip {
       display: inline-flex; align-items: center; gap: 4px;
-      padding: 2px 8px; border-radius: 99px;
+      padding: 1px 7px; border-radius: 99px;
       background: var(--surface-2); border: 1px solid var(--card-border);
-      color: var(--muted); font-size: 11px; cursor: pointer;
-      max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--muted); font-size: 10.5px; cursor: pointer;
+      max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       transition: border-color .12s, color .12s; flex-shrink: 0;
     }
     .recent-chip:hover { border-color: var(--accent); color: var(--title); }
     .recent-chip .chip-icon { flex-shrink: 0; font-size: 10px; }
 
     /* ── Scan row inside source panel ── */
-    .scan-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .scan-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 
     .scan-display {
       width: 100%;
@@ -180,7 +193,7 @@
 
     /* ── Inputs & buttons ── */
     input[type="text"], input[type="password"], input[type="number"], select {
-      padding: 6px 10px; border-radius: var(--radius);
+      padding: 5px 9px; border-radius: var(--radius);
       border: 1px solid var(--card-border); background: var(--select-bg);
       color: var(--title); font-size: 13px; font-family: var(--font);
       outline: none; transition: border-color .15s, box-shadow .15s;
@@ -188,12 +201,12 @@
     input:focus, select:focus {
       border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
     }
-    select { height: 34px; min-width: 150px; cursor: pointer; }
+    select { height: 30px; min-width: 120px; cursor: pointer; }
 
     .btn {
-      padding: 6px 11px; border-radius: var(--radius);
+      padding: 5px 10px; border-radius: var(--radius);
       border: 1px solid var(--card-border); background: var(--surface-2);
-      color: var(--muted-2); cursor: pointer; font-size: 12.5px; font-weight: 500;
+      color: var(--muted-2); cursor: pointer; font-size: 12px; font-weight: 500;
       font-family: var(--font); letter-spacing: 0.01em;
       transition: background .15s, border-color .15s, color .15s; white-space: nowrap;
     }
@@ -201,10 +214,10 @@
     .btn:disabled { opacity: .4; cursor: not-allowed; }
 
     .btn-scan {
-      padding: 6px 14px; border-radius: var(--radius);
+      padding: 5px 12px; border-radius: var(--radius);
       border: 1px solid rgba(59,130,246,0.35); cursor: pointer;
       background: var(--accent); color: #fff;
-      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      font-size: 12px; font-weight: 600; font-family: var(--font);
       letter-spacing: 0.04em; text-transform: uppercase;
       transition: background .15s, box-shadow .15s; white-space: nowrap;
     }
@@ -221,10 +234,10 @@
     .btn-cancel:hover { background: rgba(255,255,255,0.04); color: var(--muted-2); }
 
     .btn-go {
-      padding: 6px 16px; border-radius: var(--radius);
+      padding: 5px 14px; border-radius: var(--radius);
       border: 1px solid rgba(34,197,94,0.3); cursor: pointer;
       background: var(--green); color: #fff;
-      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      font-size: 12px; font-weight: 600; font-family: var(--font);
       letter-spacing: 0.04em; text-transform: uppercase;
       transition: background .15s, box-shadow .15s; white-space: nowrap;
     }
@@ -232,10 +245,10 @@
     .btn-go:disabled { opacity: .4; cursor: not-allowed; }
 
     .btn-danger {
-      padding: 6px 11px; border-radius: var(--radius);
+      padding: 5px 10px; border-radius: var(--radius);
       border: 1px solid rgba(239,68,68,0.3); cursor: pointer;
       background: var(--red); color: #fff;
-      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      font-size: 12px; font-weight: 600; font-family: var(--font);
       transition: background .15s, box-shadow .15s; white-space: nowrap;
     }
     .btn-danger:hover:not(:disabled) { background: var(--red-hover); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
@@ -246,13 +259,13 @@
     .results {
       flex: 1; display: flex; flex-direction: column; min-width: 0;
       background: var(--surface); border-radius: var(--radius-lg);
-      padding: 10px; border: 1px solid var(--card-border); min-height: 0; overflow: hidden;
+      padding: 7px 8px; border: 1px solid var(--card-border); min-height: 0; overflow: hidden;
     }
 
     /* ── Category tabs ── */
-    .cat-tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
+    .cat-tabs { display: flex; gap: 3px; margin-bottom: 5px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
     .cat-tab {
-      padding: 4px 10px; border-radius: 99px;
+      padding: 3px 9px; border-radius: 99px;
       border: 1px solid var(--card-border); background: transparent;
       color: var(--muted); font-size: 11.5px; font-weight: 600;
       cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
@@ -338,20 +351,20 @@
     .title-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .title-cusa {
       font-size: 11px; color: var(--muted); margin-top: 2px;
-      font-family: ui-monospace, monospace; font-weight: 500;
+      font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; font-weight: 500;
       letter-spacing: 0.03em; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis;
     }
     .title-path {
       font-size: 10px; color: rgba(255,255,255,0.2); margin-top: 2px;
-      font-family: ui-monospace, monospace;
+      font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       /* no hardcoded max-width — inherits column constraint from table-layout:fixed */
     }
     .title-sub  { font-size: 11px; color: var(--muted); margin-top: 1px; font-weight: 400; }
     .pkg-filename {
       font-size: 10.5px; color: var(--muted); margin-top: 2px;
-      font-family: ui-monospace, monospace; cursor: pointer;
+      font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; cursor: pointer;
       transition: color .12s;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       /* no hardcoded max-width — inherits column constraint */
@@ -364,7 +377,7 @@
     /* Filename-guessed title: slightly muted */
     .title-name.title-from-fn   { color: #c8d8f0; }
     /* Fallback = CUSA ID or raw filename: muted monospace */
-    .title-name.title-fallback  { color: var(--muted-2); font-family: ui-monospace, monospace; font-size: 12px; }
+    .title-name.title-fallback  { color: var(--muted-2); font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; }
 
     /* ── Badges ── */
     .cat-badge, .reg-badge {
@@ -408,16 +421,6 @@
     .row-btn--install:hover { background: rgba(168,85,247,0.12); }
     td.acts { white-space: nowrap; }
 
-    /* ── Image preview popup ── */
-    .img-preview {
-      position: fixed; display: none; pointer-events: none;
-      z-index: 12000; max-width: 280px; max-height: 280px;
-      border-radius: 10px; border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(10,12,16,0.96); padding: 6px;
-      box-shadow: 0 18px 50px rgba(0,0,0,0.75);
-    }
-    .img-preview img { display: block; max-width: 100%; max-height: 100%; border-radius: 8px; }
-
     /* ── Modals ── */
     .modal-backdrop {
       position: fixed; inset: 0; display: none;
@@ -437,7 +440,8 @@
     .modal-header {
       position: relative; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
     }
-    .modal-header h4 { font-size: 15px; font-weight: 600; color: var(--title); margin: 0; }
+    .about-modal .modal-header { flex-direction: row; align-items: center; position: relative; }
+    .modal-header h4 { font-size: 15px; font-weight: 600; color: var(--title); margin: 0; letter-spacing: -0.02em; }
     .modal-header .modal-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
     .modal-body { max-height: 440px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
@@ -453,41 +457,52 @@
     .modal.busy .close-btn { display: none !important; }
 
     /* ── Go modal progress ── */
-    .go-modal { width: 520px; }
+    .about-modal { width: 420px; }
+    .about-logo-wrap { flex-shrink: 0; }
+    .go-modal { width: 540px; }
+    /* ── Transfer progress bars ── */
+    .xfer-bar-wrap  { background: rgba(255,255,255,0.05); border-radius: 99px; overflow: hidden; }
+    .xfer-bar-fill  { height: 100%; border-radius: 99px; transition: width .25s ease; }
+    .xfer-bar-file  { height: 5px; }
+    .xfer-bar-file .xfer-bar-fill  { background: var(--accent-2); }
+    .xfer-bar-total { height: 7px; }
+    .xfer-bar-total .xfer-bar-fill { background: var(--accent); }
+    .xfer-label     { display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted); margin-bottom:3px; }
+    .xfer-label strong { color: var(--title); font-weight:600; font-size:12px; }
+    .xfer-stats     { display:flex; gap:16px; font-size:11px; color:var(--muted); font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; margin-top:3px; flex-wrap:wrap; }
+    .xfer-stats span.hi { color: var(--title); font-weight:600; }
+    /* ── go-* aliases kept for back-compat ── */
     .go-file-bar-wrap    { background: rgba(255,255,255,0.05); border-radius: 99px; height: 4px; overflow: hidden; }
     .go-file-bar-fill    { height: 100%; background: var(--accent-2); border-radius: 99px; transition: width .15s; }
     .go-overall-bar-wrap { background: rgba(255,255,255,0.05); border-radius: 99px; height: 6px; overflow: hidden; }
     .go-overall-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+    /* ── install item bar ── */
+    .install-item .ii-bar { height: 100%; background: #7c3aed; border-radius: 99px; transition: width .25s ease; width: 0%; }
 
     /* ── Rename modal ── */
     .rename-modal { width: 560px; }
     .rename-preview {
       margin-top: 6px; padding: 8px 10px; border-radius: var(--radius);
       background: rgba(255,255,255,0.03); border: 1px solid var(--card-border);
-      font-family: ui-monospace, monospace; font-size: 12px; color: var(--accent-2);
+      font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--accent-2);
       word-break: break-all; min-height: 32px;
     }
     .rename-tokens { display: flex; gap: 6px; flex-wrap: wrap; }
     .token-chip {
       padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
       background: var(--surface-2); border: 1px solid var(--card-border);
-      color: var(--muted-2); cursor: pointer; font-family: ui-monospace, monospace;
+      color: var(--muted-2); cursor: pointer; font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;
       transition: border-color .1s, color .1s;
     }
     .token-chip:hover { color: var(--accent-2); border-color: var(--accent); }
 
-    /* ── FTP modal ── */
-    .ftp-modal { width: 480px; }
+    /* ── FTP / console scan modal ── */
+    .console-scan-modal { width: 500px; }
     .ftp-field-group { display: flex; flex-direction: column; gap: 6px; }
     .ftp-field-group label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
     .ftp-field-group input { width: 100%; }
     .ftp-row { display: flex; gap: 8px; }
     .ftp-row .ftp-field-group { flex: 1; }
-    #ftpStatus {
-      font-size: 12px; padding: 7px 10px; border-radius: var(--radius);
-      background: rgba(255,255,255,0.02); border: 1px solid var(--card-border);
-      color: var(--muted); min-height: 32px; display: flex; align-items: center;
-    }
 
     /* ── Install button ── */
     .btn-install {
@@ -512,7 +527,7 @@
     .install-local-ip {
       font-size: 11px; color: var(--muted); padding: 6px 10px;
       background: rgba(255,255,255,0.02); border: 1px solid var(--card-border);
-      border-radius: var(--radius); font-family: ui-monospace,monospace;
+      border-radius: var(--radius); font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;
     }
     /* install items list */
     .install-items {
@@ -528,12 +543,35 @@
     .install-item .ii-icon { font-size: 18px; flex-shrink: 0; width: 26px; text-align: center; }
     .install-item .ii-info { flex: 1; min-width: 0; }
     .install-item .ii-name { font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .install-item .ii-status { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: ui-monospace,monospace; }
-    .install-item .ii-bar-wrap { height: 3px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; margin-top: 5px; }
-    .install-item .ii-bar { height: 100%; background: #7c3aed; border-radius: 99px; transition: width .4s ease; width: 0%; }
+    .install-item .ii-status { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; }
+    .install-item .ii-stats  { display:flex; gap:12px; font-size:10.5px; color:var(--muted); font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; margin-top:2px; flex-wrap:wrap; }
+    .install-item .ii-stats .hi { color: var(--title); }
+    .install-item .ii-bar-wrap { height: 4px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; margin-top: 6px; }
     .install-item.ii-done   { border-color: rgba(34,197,94,0.25);  }
     .install-item.ii-error  { border-color: rgba(239,68,68,0.25);  }
     .install-item.ii-active { border-color: rgba(168,85,247,0.35); }
+    /* ── Install phase bar ── */
+    .phase-spinner {
+      width: 16px; height: 16px; flex-shrink: 0;
+      border: 2px solid rgba(168,85,247,0.2);
+      border-top-color: #a855f7;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    .phase-spinner.done  { border-color: rgba(34,197,94,0.4); border-top-color: #4ade80; animation: none; }
+    .phase-spinner.error { border-color: rgba(239,68,68,0.4); border-top-color: #f87171; animation: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .install-item .ii-phase {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .06em;
+      padding: 1px 6px; border-radius: 4px; margin-right: 6px;
+      vertical-align: middle;
+    }
+    .ii-phase-wait    { background: rgba(255,255,255,0.06); color: var(--muted); }
+    .ii-phase-sending { background: rgba(168,85,247,0.15); color: #a855f7; }
+    .ii-phase-dl      { background: rgba(59,130,246,0.15);  color: #60a5fa; }
+    .ii-phase-done    { background: rgba(34,197,94,0.15);   color: #4ade80; }
+    .ii-phase-error   { background: rgba(239,68,68,0.15);   color: #f87171; }
     .install-warn-box {
       padding: 8px 10px; border-radius: var(--radius);
       background: rgba(234,179,8,0.07); border: 1px solid rgba(234,179,8,0.2);
@@ -551,12 +589,95 @@
     }
     .toast--err { color: #f87171; border-color: rgba(239,68,68,0.3); }
 
-    /* ── Scan PS4 button ── */
-    .btn-ps4 {
-      background: rgba(0,90,180,0.18); border-color: rgba(0,120,220,0.4);
-      color: #60b0ff; font-weight: 600;
+    /* ── FTP destination indicator ── */
+    .ftp-dest-indicator {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 8px; border-radius: var(--radius);
+      background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25);
+      color: #4ade80; font-size: 11px; font-weight: 600; margin-top: -2px;
     }
-    .btn-ps4:hover:not(:disabled) { background: rgba(0,90,180,0.32); color: #90c8ff; border-color: rgba(0,140,255,0.6); }
+    .chip-btn--dest { background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #4ade80; }
+    .chip-btn--dest:hover { background: rgba(34,197,94,0.3); color: #86efac; }
+
+    /* ── Scan PS4/PS5 button ── */
+    .btn-ps4 {
+      background: linear-gradient(135deg, rgba(0,60,140,0.25), rgba(0,40,100,0.18));
+      border-color: rgba(0,120,220,0.45); color: #6bb8ff; font-weight: 600;
+    }
+    .btn-ps4:hover:not(:disabled) { background: rgba(0,90,180,0.32); color: #90c8ff; border-color: rgba(0,160,255,0.65); }
+
+    /* ── Discovered device chip ── */
+    .discovered-chip {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 8px; border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, rgba(0,60,140,0.22), rgba(0,30,80,0.15));
+      border: 1px solid rgba(0,150,255,0.35);
+      font-size: 11.5px; flex-wrap: wrap; margin-top: 1px;
+      animation: chipIn .25s ease-out;
+    }
+    @keyframes chipIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    .discovered-chip span { color: #7cc8ff; font-weight: 500; }
+    #discoveredChipIcon { font-size: 16px; }
+    #discoveredChipLabel { flex: 1; color: #a0d4ff !important; font-weight: 600; }
+    .chip-btn {
+      padding: 3px 10px; border-radius: 99px;
+      background: rgba(0,120,220,0.25); border: 1px solid rgba(0,150,255,0.4);
+      color: #7cc8ff; font-size: 11px; font-weight: 600; cursor: pointer;
+      font-family: var(--font); transition: background .12s, color .12s;
+    }
+    .chip-btn:hover { background: rgba(0,120,220,0.45); color: #fff; }
+    .chip-btn--secondary { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.12); color: var(--muted-2); }
+    .chip-btn--secondary:hover { background: rgba(255,255,255,0.12); color: var(--title); }
+    .chip-dismiss {
+      background: transparent; border: none; color: var(--muted); cursor: pointer;
+      font-size: 13px; padding: 2px 4px; line-height: 1; border-radius: 3px;
+      transition: color .12s;
+    }
+    .chip-dismiss:hover { color: var(--title); }
+
+    /* ── Installed tab ── */
+    .cat-tab--installed { border-color: rgba(34,197,94,0.25); }
+    .cat-tab--installed.active { background: #15803d; box-shadow: 0 0 0 2px rgba(34,197,94,0.2); }
+
+    /* ── Installed row ── */
+    tbody tr.row-installed td { background: rgba(34,197,94,0.04) !important; }
+    tbody tr.row-installed:hover td { background: rgba(34,197,94,0.08) !important; }
+    tbody tr.row-installed.row-selected td { background: rgba(34,197,94,0.1) !important; }
+
+    /* ── Installed badge ── */
+    .installed-badge {
+      display: inline-flex; align-items: center; padding: 1px 5px;
+      border-radius: 3px; font-size: 9px; font-weight: 700;
+      background: rgba(34,197,94,0.18); color: #4ade80;
+      letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0;
+    }
+
+    /* ── Hover cover preview ── */
+    .img-preview {
+      /* position:fixed is relative to viewport — but ONLY if no ancestor has
+         transform/filter/will-change. Using contain:none prevents clip-by-parent. */
+      position: fixed;
+      display: none;
+      pointer-events: none;
+      z-index: 99999;               /* highest possible — above all modals */
+      width: 360px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: #0a0c10;          /* solid bg — no transparency so it's always readable */
+      padding: 8px;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.92), 0 0 0 1px rgba(255,255,255,0.04) inset;
+      /* Prevent the panel itself from being clipped by any overflow:hidden parent */
+      contain: none !important;
+    }
+    .img-preview img {
+      display: block; width: 100%; height: auto;
+      border-radius: 8px;
+      min-height: 40px;             /* show something while image decodes */
+      background: rgba(255,255,255,0.04);
+    }
+    .img-preview-meta { padding: 8px 4px 2px; font-size: 11px; line-height: 1.5; }
+    .img-preview-title { font-weight: 600; color: #f0f4ff; font-size: 12.5px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .img-preview-sub   { color: rgba(255,255,255,0.45); font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; }
 
     /* ── View toggle ── */
     .btn-view-toggle { font-size: 12px; padding: 5px 10px; }
@@ -591,7 +712,7 @@
     }
     .grid-card .gc-sub {
       font-size: 10px; color: var(--muted); margin-top: 3px;
-      font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .grid-card .gc-badge-row { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
     .grid-card .gc-check {
@@ -637,11 +758,11 @@
 
     /* ── Results header ── */
     .results-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
       flex-wrap: wrap; flex-shrink: 0; min-width: 0; overflow: hidden;
     }
-    .results-title { font-weight: 800; font-size: 14px; flex-shrink: 0; white-space: nowrap; }
-    .search-input  { width: 180px; min-width: 100px; flex-shrink: 1; }
+    .results-title { font-weight: 700; font-size: 14px; flex-shrink: 0; white-space: nowrap; letter-spacing: -0.02em; }
+    .search-input  { width: 200px; min-width: 120px; flex-shrink: 1; }
     .batch-actions { display: flex; gap: 5px; margin-left: auto; align-items: center; flex-wrap: nowrap; flex-shrink: 0; }
 
     /* ── Label / form rows ── */
@@ -651,13 +772,45 @@
     .form-block label { font-size: 11px; color: var(--muted); font-weight: 600; }
     #renameFmtRow { align-items: center; gap: 8px; margin-top: 4px; }
     #renameFmtRow label { font-size: 11px; color: var(--muted); white-space: nowrap; }
-    #renameFmtInput { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; font-size: 12px; }
+    #renameFmtInput { flex: 1; min-width: 180px; font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; }
 
     @media (max-width: 980px) {
       .controls-row { flex-direction: column; align-items: stretch; }
       .controls-left { max-width: 100%; }
       th.cover, td.cover, .thumb { display: none; }
     }
+
+
+    /* ── Auto-update banner ── */
+    .update-banner {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 25000;
+      background: linear-gradient(90deg, #1e3a5f, #1a3350);
+      border-top: 1px solid rgba(99,179,237,0.35);
+      padding: 9px 18px; display: none;
+      align-items: center; gap: 12px; font-size: 12.5px;
+      animation: slideUp .25s ease-out;
+    }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: none; } }
+    .update-banner.show { display: flex; }
+    .update-banner .ub-msg  { flex: 1; color: #93c5fd; }
+    .update-banner .ub-msg strong { color: #e0f2fe; font-weight: 700; }
+    .update-banner .ub-progress { font-size: 11px; color: #60a5fa; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .update-banner button { padding: 4px 12px; border-radius: var(--radius); font-size: 12px;
+      cursor: pointer; border: none; font-weight: 600; transition: opacity .15s; }
+    .update-banner button:hover { opacity: .85; }
+    #btnUpdateDownload { background: #2563eb; color: #fff; }
+    #btnUpdateInstall  { background: #16a34a; color: #fff; }
+    #btnUpdateDismiss  { background: transparent; border: 1px solid rgba(255,255,255,0.15) !important;
+      color: rgba(255,255,255,0.5); font-size: 11px; padding: 3px 8px; }
+    /* ── Themed scrollbars ── */
+    ::-webkit-scrollbar              { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track        { background: transparent; }
+    ::-webkit-scrollbar-thumb        { background: rgba(255,255,255,0.1); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover  { background: rgba(255,255,255,0.2); }
+    ::-webkit-scrollbar-corner       { background: transparent; }
+    [data-theme="light"] ::-webkit-scrollbar-thumb       { background: rgba(0,0,0,0.15); }
+    [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
+
   </style>
 </head>
 <body data-theme="dark">
@@ -669,7 +822,7 @@
       <div class="logo-wrap" aria-label="PS4 Vault logo" role="img">
         <img id="brandLogo" class="brand-logo" src="./assets/logo.jpg" alt="PS4 Vault logo"
              onerror="this.style.display='none';document.getElementById('brandFallback').style.display='flex'">
-        <svg id="brandFallback" style="display:none;height:48px;width:auto;border-radius:8px;" height="48" viewBox="0 0 96 48" xmlns="http://www.w3.org/2000/svg">
+        <svg id="brandFallback" style="display:none;height:36px;width:auto;border-radius:6px;" height="36" viewBox="0 0 96 48" xmlns="http://www.w3.org/2000/svg">
           <rect width="96" height="48" rx="8" fill="#0c1a2e"/>
           <text x="48" y="21" text-anchor="middle" font-size="11" font-family="Segoe UI,Arial" fill="#93c5fd" font-weight="700">PS4</text>
           <text x="48" y="35" text-anchor="middle" font-size="9"  font-family="Segoe UI,Arial" fill="#60a5fa" font-weight="600">VAULT</text>
@@ -677,7 +830,7 @@
       </div>
       <div class="meta">
         <div class="app-title">PS4 Vault</div>
-        <div class="app-sub">Scan &amp; organise PS4 .pkg files  v1.1.0</div>
+        <div class="app-sub">v1.3.0</div>
       </div>
     </div>
 
@@ -689,6 +842,11 @@
         <option value="unselectAll">Unselect All</option>
         <option value="exportCsv">Export CSV</option>
         <option value="clear">Clear Results</option>
+        <option value="" disabled>──────────</option>
+        <option value="checkUpdate">🔄 Check for Updates</option>
+        <option value="openLog">📋 View Log File</option>
+        <option value="openLogFolder">📂 Open Log Folder</option>
+        <option value="about">About PS4 Vault</option>
       </select>
       <a class="discord-link" href="#" onclick="pkgApi.openExternal('https://discord.gg/nj45kDSBEd');return false;">💬 Discord</a>
     </div>
@@ -699,20 +857,26 @@
 
     <!-- Source panel -->
     <div class="ctrl-panel">
-      <div class="ctrl-panel-label">Source</div>
       <div class="input-group">
-        <input id="sourcePath" type="text" placeholder="Folder containing .pkg files" list="sourceHistory" autocomplete="off" />
+        <span class="ctrl-panel-label" style="flex-shrink:0;white-space:nowrap;padding-right:2px;">Source</span>
+        <input id="sourcePath" type="text" placeholder="Folder path…" list="sourceHistory" autocomplete="off" style="flex:1;min-width:0;" />
         <datalist id="sourceHistory"></datalist>
-        <button id="btnPickSource" class="btn" title="Browse">📁</button>
-        <button id="btnClearSource" class="btn-clear" title="Clear source">✕</button>
+        <button id="btnPickSource" class="btn" title="Browse for folder">📁</button>
+        <button id="btnClearSource" class="btn-clear" title="Clear">✕</button>
+        <button id="btnScan" class="btn-scan" title="Scan selected folder for .pkg files">SCAN</button>
+        <button id="btnScanAllDrives" class="btn" title="Scan every connected drive" style="white-space:nowrap;">All Drives</button>
+        <button id="btnScanConsole" class="btn btn-ps4" title="Scan PS4/PS5 via FTP or send PKGs remotely" style="white-space:nowrap;">🎮 PS4/PS5</button>
+        <button id="btnCancelScan" class="btn-cancel" style="display:none;white-space:nowrap;">✕ Cancel</button>
       </div>
       <div id="recentSrcChips" class="recent-chips"></div>
-      <div class="scan-row">
-        <button id="btnScan" class="btn-scan">SCAN</button>
-        <button id="btnScanAllDrives" class="btn" title="Scan every connected drive">All Drives</button>
-        <button id="btnFtpScan" class="btn" title="Scan .pkg files over FTP">🌐 FTP Scan</button>
-        <button id="btnScanPs4" class="btn btn-ps4" title="Scan your PS4 via FTP (port 2121)">🎮 Scan PS4</button>
-        <button id="btnCancelScan" class="btn-cancel" style="display:none">✕ Cancel</button>
+      <!-- Discovered device chip — shown when a PS4/PS5 is found on the network -->
+      <div id="discoveredChip" class="discovered-chip" style="display:none">
+        <span id="discoveredChipIcon">🎮</span>
+        <span id="discoveredChipLabel"></span>
+        <button id="discoveredChipScan" class="chip-btn">Scan PKGs</button>
+        <button id="discoveredChipInstalled" class="chip-btn chip-btn--secondary">Installed</button>
+        <button id="discoveredChipUseDest" class="chip-btn chip-btn--dest" title="Use console as copy/move destination">📥 Use as Dest</button>
+        <button id="discoveredChipDismiss" class="chip-dismiss" title="Dismiss">✕</button>
       </div>
       <div id="scanDisplay" class="scan-display" style="display:none">
         <div id="currentScanLabel" class="current-scan"></div>
@@ -722,35 +886,32 @@
 
     <!-- Destination panel -->
     <div class="ctrl-panel">
-      <div class="ctrl-panel-label">Destination</div>
       <div class="input-group">
-        <input id="destPath" type="text" placeholder="Destination folder" list="destHistory" autocomplete="off" />
+        <span class="ctrl-panel-label" style="flex-shrink:0;white-space:nowrap;padding-right:2px;">Dest</span>
+        <input id="destPath" type="text" placeholder="Destination folder…" list="destHistory" autocomplete="off" style="flex:1;min-width:0;" />
         <datalist id="destHistory"></datalist>
-        <button id="btnPickDest" class="btn" title="Browse">📁</button>
-        <button id="btnClearDest" class="btn-clear" title="Clear destination">✕</button>
+        <button id="btnPickDest" class="btn" title="Browse for destination">📁</button>
+        <button id="btnClearDest" class="btn-clear" title="Clear">✕</button>
+        <button id="btnGoSelected" class="btn-go" disabled title="Copy / move selected PKGs to destination">GO</button>
+        <select id="actionSelect" style="min-width:68px;">
+          <option value="copy">Copy</option>
+          <option value="move" selected>Move</option>
+        </select>
+        <select id="layoutSelect" style="min-width:92px;">
+          <option value="flat" selected>Flat</option>
+          <option value="by-title-id">By Title ID</option>
+          <option value="by-category">By Category</option>
+          <option value="rename">Rename only</option>
+          <option value="rename-organize">Rename + Org.</option>
+        </select>
       </div>
       <div id="recentDstChips" class="recent-chips"></div>
-      <div class="dest-action-row">
-        <button id="btnGoSelected" class="btn-go" disabled title="Copy / move selected PKGs">GO</button>
-        <div class="dest-selects">
-          <select id="actionSelect">
-            <option value="copy">Copy</option>
-            <option value="move" selected>Move</option>
-          </select>
-          <select id="layoutSelect">
-            <option value="flat" selected>Flat</option>
-            <option value="by-title-id">By Title ID</option>
-            <option value="by-category">By Category → ID</option>
-            <option value="rename">Rename only</option>
-            <option value="rename-organize">Rename + Organise</option>
-          </select>
-        </div>
-      </div>
-      <div id="renameFmtRow" class="input-group" style="display:none">
-        <label class="label" style="white-space:nowrap;font-size:11px;">Format</label>
+      <div id="ftpDestIndicator" class="ftp-dest-indicator" style="display:none"></div>
+      <div id="renameFmtRow" class="input-group" style="display:none;margin-top:1px;">
+        <label class="label" style="white-space:nowrap;font-size:10.5px;">Format</label>
         <input id="renameFmtInput" type="text" value="{TITLE_ID} - {TITLE} [v{VERSION}] [{CATEGORY}]"
                placeholder="{TITLE_ID} - {TITLE} [v{VERSION}] [{CATEGORY}]"
-               style="font-family:ui-monospace,monospace;font-size:12px;" />
+               style="font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;font-size:11.5px;flex:1;" />
       </div>
     </div>
 
@@ -762,32 +923,31 @@
 
       <!-- Results header -->
       <div class="results-header">
-        <div class="results-title">
-          PKG Library
-          <span id="scanCount" style="font-size:12px;color:var(--muted);margin-left:8px;font-weight:500;"></span>
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <div class="results-title">PKG Library</div>
+          <span id="scanCount" style="font-size:11.5px;color:var(--muted);font-weight:400;"></span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <label for="searchInput" class="label">Search:</label>
           <input id="searchInput" class="search-input" type="text" placeholder="Filter by name, ID, filename…" />
         </div>
         <div class="batch-actions">
           <span id="selectedCount" style="font-size:12px;color:var(--muted);"></span>
           <button id="btnViewToggle" class="btn btn-view-toggle" title="Toggle grid / table view">⊞ Grid</button>
-          <button id="btnRenameSelected" class="btn" disabled>Rename</button>
-          <button id="btnInstallSelected" class="btn-install" disabled title="Send selected PKGs to PS4 via Remote Package Installer">📡 Install to PS4</button>
-          <button id="btnDeleteSelected" class="btn btn-danger" disabled>Delete</button>
+          <button id="btnRenameSelected" class="btn" disabled title="Rename selected PKG files">Rename</button>
+          <button id="btnInstallSelected" class="btn-install" disabled title="Send selected PKGs to PS4/PS5 via Remote PKG Installer or etaHEN">📡 Install</button>
+          <button id="btnDeleteSelected" class="btn btn-danger" disabled title="Permanently delete selected PKG files">Delete</button>
         </div>
       </div>
 
-      <!-- Category tabs -->
       <div class="cat-tabs">
-        <button class="cat-tab active" data-cat="all"   id="catAll">   All   <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="Game"  id="catGame">  Game  <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="Patch" id="catPatch"> Patch <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="DLC"   id="catDLC">   DLC   <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="App"   id="catApp">   App   <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="Theme" id="catTheme"> Theme <span class="cat-count">0</span></button>
-        <button class="cat-tab"        data-cat="Other" id="catOther"> Other <span class="cat-count">0</span></button>
+        <button class="cat-tab active" data-cat="all"       id="catAll">All <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Game"      id="catGame">Game <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Patch"     id="catPatch">Patch <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="DLC"       id="catDLC">DLC <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="App"       id="catApp">App <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Theme"     id="catTheme">Theme <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Other"     id="catOther">Other <span class="cat-count">0</span></button>
+        <button class="cat-tab cat-tab--installed" data-cat="Installed" id="catInstalled">💾 Installed <span class="cat-count">0</span></button>
       </div>
 
       <!-- Table view -->
@@ -836,7 +996,7 @@
 
 <!-- ── Context menu ── -->
 <div id="ctxMenu" class="ctx-menu" style="display:none">
-  <button class="ctx-item" id="ctxInstall">📡 Install to PS4</button>
+  <button class="ctx-item" id="ctxInstall">📡 Install to PS4 / PS5</button>
   <button class="ctx-item" id="ctxShowFolder">📂 Show in folder</button>
   <button class="ctx-item" id="ctxCopyName">📋 Copy filename</button>
   <button class="ctx-item" id="ctxCopyId">🔖 Copy CUSA ID</button>
@@ -847,42 +1007,57 @@
 </div>
 
 <!-- ── Image preview popup ── -->
-<div id="imgPreview" class="img-preview"><img src="" alt="preview" /></div>
+<div id="imgPreview" class="img-preview">
+  <img id="imgPreviewImg" src="" alt="preview" />
+  <div class="img-preview-meta" id="imgPreviewMeta" style="display:none">
+    <div class="img-preview-title" id="imgPreviewTitle"></div>
+    <div class="img-preview-sub"  id="imgPreviewSub"></div>
+  </div>
+</div>
 
-<!-- ── FTP Scan modal ── -->
-<div id="ftpModalBackdrop" class="modal-backdrop" aria-hidden="true">
-  <div class="modal ftp-modal" role="dialog" aria-modal="true" aria-labelledby="ftpModalTitle">
+<!-- ── Console Scan modal (PS4 / PS5 via FTP) ── -->
+<div id="consoleScanBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal console-scan-modal" role="dialog" aria-modal="true" aria-labelledby="consoleScanTitle">
     <div class="modal-header">
-      <h4 id="ftpModalTitle">FTP Scan</h4>
-      <div class="modal-sub">Connect to a PS4 or server over FTP to scan for .pkg files</div>
-      <button class="close-btn" id="btnFtpClose" aria-label="Close">✕</button>
+      <h4 id="consoleScanTitle">🎮 Scan PS4 / PS5</h4>
+      <div class="modal-sub">Connect to your PS4/PS5 over FTP to scan PKG files or installed games (CUSA titles only)</div>
+      <button class="close-btn" id="btnConsoleScanClose" aria-label="Close">✕</button>
     </div>
-    <div class="modal-body">
+    <div class="modal-body" style="gap:10px;">
+
+      <!-- IP + port row -->
       <div class="ftp-row">
         <div class="ftp-field-group" style="flex:2">
-          <label>Host / IP</label>
-          <input id="ftpHost" type="text" placeholder="192.168.1.x" autocomplete="off" list="ftpHostHistory" />
-          <datalist id="ftpHostHistory"></datalist>
+          <label>Console IP Address</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="csHost" type="text" placeholder="192.168.1.x" autocomplete="off" list="csHostHistory" style="flex:1" />
+            <datalist id="csHostHistory"></datalist>
+            <button id="btnConsoleScanDiscover" class="btn" style="white-space:nowrap;padding:6px 10px" title="Auto-detect PS4/PS5 on your network">🔍 Find</button>
+          </div>
         </div>
         <div class="ftp-field-group" style="flex:1">
-          <label>Port</label>
-          <input id="ftpPort" type="number" placeholder="21" value="21" min="1" max="65535" />
+          <label>FTP Port</label>
+          <input id="csFtpPort" type="number" value="2121" min="1" max="65535" />
         </div>
       </div>
+
+      <!-- Auth row -->
       <div class="ftp-row">
         <div class="ftp-field-group">
           <label>Username</label>
-          <input id="ftpUser" type="text" placeholder="anonymous" value="anonymous" />
+          <input id="csUser" type="text" value="anonymous" />
         </div>
         <div class="ftp-field-group">
           <label>Password</label>
-          <input id="ftpPass" type="password" placeholder="(leave blank if none)" />
+          <input id="csPass" type="password" placeholder="(leave blank)" />
         </div>
       </div>
+
+      <!-- Scan path -->
       <div class="ftp-field-group">
-        <label>Start path</label>
-        <input id="ftpPath" type="text" placeholder="/" value="/" list="ftpPathHistory" />
-        <datalist id="ftpPathHistory">
+        <label>PKG scan path</label>
+        <input id="csPkgPath" type="text" value="/" list="csPkgPathHistory" />
+        <datalist id="csPkgPathHistory">
           <option value="/">/</option>
           <option value="/data/pkg">/data/pkg</option>
           <option value="/mnt/usb0">/mnt/usb0</option>
@@ -890,12 +1065,18 @@
           <option value="/mnt/ext0">/mnt/ext0</option>
         </datalist>
       </div>
-      <div id="ftpStatus"></div>
+
+      <!-- Status -->
+      <div id="csScanStatus" style="font-size:12px;padding:6px 8px;border-radius:var(--radius);
+           background:rgba(255,255,255,0.02);border:1px solid var(--card-border);
+           color:var(--muted);min-height:30px;display:flex;align-items:center;"></div>
+
     </div>
     <div class="modal-actions">
-      <button id="btnFtpCancel" class="btn">Cancel</button>
-      <button id="btnFtpConnect" class="btn">Test Connection</button>
-      <button id="btnFtpScanStart" class="btn-scan">Scan PKGs</button>
+      <button id="btnConsoleScanCancel" class="btn">Close</button>
+      <button id="btnConsoleScanTestConn" class="btn">🔌 Test FTP</button>
+      <button id="btnConsoleScanInstalled" class="btn" title="Scan installed games on the console">💾 Scan Installed</button>
+      <button id="btnConsoleScanPkgs" class="btn-scan">📦 Scan PKGs</button>
     </div>
   </div>
 </div>
@@ -905,7 +1086,7 @@
   <div class="modal rename-modal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle">
     <div class="modal-header">
       <h4 id="renameModalTitle">Rename PKG</h4>
-      <button class="close-btn" onclick="document.getElementById('renameModalBackdrop').style.display='none'">✕</button>
+      <button class="close-btn" id="btnRenameClose" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
       <div class="form-block">
@@ -914,7 +1095,7 @@
       </div>
       <div class="form-block">
         <label>Name / format string</label>
-        <input id="renameInput" type="text" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;" />
+        <input id="renameInput" type="text" style="width:100%;font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;font-size:12px;" />
       </div>
       <div class="form-block">
         <label>Insert token</label>
@@ -944,22 +1125,38 @@
 <div id="goModalBackdrop" class="modal-backdrop" aria-hidden="true">
   <div class="modal go-modal busy" id="goModal" role="dialog" aria-modal="true">
     <div class="modal-header">
-      <div id="goModalTitle" style="font-size:15px;font-weight:600;color:var(--title);">Moving PKGs…</div>
+      <div id="goModalTitle" style="font-size:15px;font-weight:600;color:var(--title);">Transferring…</div>
       <button id="goModalClose" class="close-btn" style="display:none">✕</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:14px;padding:4px 0;">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-        <span id="goModalFile" style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;"></span>
-        <span id="goModalProgress" style="font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums;"></span>
-      </div>
+
+      <!-- Current file -->
       <div>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;">Current file</div>
-        <div class="go-file-bar-wrap"><div id="goFilebar" class="go-file-bar-fill" style="width:0%"></div></div>
+        <div class="xfer-label">
+          <strong id="goModalFile">—</strong>
+          <span id="goModalProgress" style="font-variant-numeric:tabular-nums;"></span>
+        </div>
+        <div class="xfer-bar-wrap xfer-bar-file"><div id="goFilebar" class="xfer-bar-fill" style="width:0%"></div></div>
+        <div class="xfer-stats">
+          <span id="goFileSpeed"></span>
+          <span id="goFileEta"></span>
+          <span id="goFileBytes"></span>
+        </div>
       </div>
+
+      <!-- Overall -->
       <div>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;">Overall</div>
-        <div class="go-overall-bar-wrap"><div id="goOverallbar" class="go-overall-bar-fill" style="width:0%"></div></div>
+        <div class="xfer-label">
+          <span style="text-transform:uppercase;letter-spacing:.06em;font-size:10px;">Overall</span>
+          <span id="goOverallPct" style="font-variant-numeric:tabular-nums;"></span>
+        </div>
+        <div class="xfer-bar-wrap xfer-bar-total"><div id="goOverallbar" class="xfer-bar-fill" style="width:0%"></div></div>
+        <div class="xfer-stats">
+          <span id="goOverallDone"></span>
+          <span id="goOverallTotal"></span>
+        </div>
       </div>
+
     </div>
     <div class="modal-actions">
       <button id="goModalCancel" class="btn">Cancel</button>
@@ -974,8 +1171,8 @@
 <div id="installModalBackdrop" class="modal-backdrop" aria-hidden="true">
   <div class="modal install-modal" role="dialog" aria-modal="true" aria-labelledby="installModalTitle">
     <div class="modal-header">
-      <h4 id="installModalTitle">📡 Install to PS4</h4>
-      <div class="modal-sub">PS4 will pull each PKG directly from this PC via HTTP</div>
+      <h4 id="installModalTitle">📡 Install to PS4 / PS5</h4>
+      <div class="modal-sub">Works with Remote PKG Installer (RPI) and etaHEN / GoldHEN</div>
       <button class="close-btn" id="btnInstallClose" aria-label="Close">✕</button>
     </div>
     <div class="modal-body" style="gap:12px;">
@@ -983,14 +1180,14 @@
       <!-- Settings row -->
       <div class="install-settings">
         <div class="form-block" style="flex:2">
-          <label>PS4 IP Address</label>
+          <label>Console IP Address</label>
           <div style="display:flex;gap:6px;align-items:center">
             <input id="installPs4Ip" type="text" placeholder="192.168.1.x" autocomplete="off" spellcheck="false" style="flex:1" />
-            <button id="btnDiscoverPs4" class="btn" title="Scan local network for PS4 (checks ports 2121, 1337, 12800)" style="white-space:nowrap;padding:6px 10px">🔍 Find PS4</button>
+            <button id="btnDiscoverPs4" class="btn" title="Auto-scan local network to find PS4/PS5 IP address" style="white-space:nowrap;padding:6px 10px">🔍 Find IP</button>
           </div>
         </div>
         <div class="form-block" style="flex:1">
-          <label>PS4 Port</label>
+          <label>Installer Port</label>
           <input id="installPs4Port" type="number" value="12800" min="1" max="65535" />
         </div>
         <div class="form-block" style="flex:1">
@@ -999,30 +1196,99 @@
         </div>
       </div>
 
-      <!-- Discover status -->
-      <div id="installDiscoverStatus" style="display:none;font-size:11px;color:var(--muted);font-family:ui-monospace,monospace;padding:4px 0"></div>
+      <!-- Connection / discovery status line -->
+      <div id="installDiscoverStatus" style="display:none;font-size:11.5px;font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;padding:5px 0;"></div>
 
-      <!-- Local IP info -->
-      <div id="installLocalIpBox" class="install-local-ip" style="display:none">
-        This PC: <span id="installLocalIp">—</span> &nbsp;·&nbsp; PS4 will download from <span id="installBaseUrl">—</span>
+      <!-- Live phase strip — shown during active install -->
+      <div id="installPhaseBar" style="display:none;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;">
+          <div id="installPhaseSpinner" class="phase-spinner"></div>
+          <div style="flex:1;min-width:0;">
+            <div id="installPhaseLabel" style="font-size:12px;font-weight:600;color:var(--title);"></div>
+            <div id="installPhaseDetail" style="font-size:11px;color:var(--muted);font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          </div>
+          <div id="installElapsed" style="font-size:11px;color:var(--muted);font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;white-space:nowrap;flex-shrink:0;"></div>
+        </div>
+        <!-- Overall download progress bar (shown once PS4 connects) -->
+        <div id="installXferWrap" style="display:none;">
+          <div class="xfer-bar-wrap xfer-bar-total" style="margin-bottom:4px;"><div id="installXferBar" class="xfer-bar-fill" style="width:0%"></div></div>
+          <div class="xfer-stats">
+            <span id="installXferSpeed"></span>
+            <span id="installXferEta"></span>
+            <span id="installXferBytes"></span>
+          </div>
+        </div>
       </div>
 
-      <!-- Warning box (FTP items, etc.) -->
+      <!-- Local IP info box -->
+      <div id="installLocalIpBox" class="install-local-ip" style="display:none">
+        🖥 This PC: <strong id="installLocalIp">—</strong> &nbsp;·&nbsp; PS4/PS5 downloads from: <code id="installBaseUrl" style="font-size:11px;">—</code>
+      </div>
+
+      <!-- Warning / info box -->
       <div id="installWarnBox" class="install-warn-box" style="display:none"></div>
 
       <!-- Per-PKG progress list -->
       <div id="installItemsList" class="install-items"></div>
 
       <!-- Summary -->
-      <div id="installSummary" style="font-size:12px;color:var(--muted);display:none;"></div>
+      <div id="installSummary" style="font-size:12px;color:var(--muted);display:none;padding:4px 0;"></div>
 
     </div>
     <div class="modal-actions">
-      <button id="btnInstallCancel" class="btn">Close</button>
-      <button id="btnTestPs4Conn" class="btn" title="Verify PS4 installer is reachable before sending">🔌 Test Connection</button>
-      <button id="btnInstallStart" class="btn-install">📡 Send to PS4</button>
+      <button id="btnInstallCancel" class="btn" title="Cancel install or close this window">Close</button>
+      <button id="btnTestPs4Conn" class="btn" title="Verify PS4/PS5 installer is reachable before sending">🔌 Test Connection</button>
+      <button id="btnInstallStart" class="btn-install">📡 Send to PS4 / PS5</button>
     </div>
   </div>
+</div>
+
+<!-- ── About Modal ── -->
+<div id="aboutModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal about-modal" id="aboutModal" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+    <div class="modal-header">
+      <h4 id="aboutModalTitle" style="margin:0;font-size:15px;">About PS4 Vault</h4>
+      <button class="close-btn" id="btnAboutClose" aria-label="Close" style="position:static;margin-left:auto;flex-shrink:0;">✕</button>
+    </div>
+    <div class="modal-body" style="align-items:center;text-align:center;gap:14px;padding:8px 0;">
+      <div style="display:flex;align-items:center;gap:16px;justify-content:center;width:100%;">
+        <div style="height:56px;width:auto;max-width:140px;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:8px;background:#0c1a2e;flex-shrink:0;border:1px solid rgba(255,255,255,0.06);">
+          <img id="aboutLogo" src="./assets/logo.jpg" alt="PS4 Vault logo"
+               onerror="this.style.display='none'"
+               style="height:56px;width:auto;max-width:140px;object-fit:contain;display:block;border-radius:8px;">
+        </div>
+        <div style="text-align:left;">
+          <div style="font-size:18px;font-weight:800;color:var(--title);letter-spacing:-.02em;line-height:1.2;">PS4 Vault</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px;">v1.3.0 · Made by Nookie</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.7;">
+            Scan · Organise · Rename<br>Transfer · Remote Install
+          </div>
+        </div>
+      </div>
+      <div id="aboutLogPath"
+           style="width:100%;font-size:10.5px;color:var(--muted);font-family: 'JetBrains Mono', 'JetBrains Mono', ui-monospace, monospace;
+                  background:rgba(255,255,255,0.03);border:1px solid var(--card-border);
+                  border-radius:var(--radius);padding:6px 10px;text-align:left;cursor:pointer;
+                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;"
+           title="Click to open log folder">
+        📋 Log: loading…
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="btnAboutDiscord" class="btn">💬 Discord</button>
+      <button id="btnAboutViewLog" class="btn">📋 View Log</button>
+      <button id="btnAboutOk" class="btn-scan">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Auto-update banner ── -->
+<div id="updateBanner" class="update-banner" role="status" aria-live="polite">
+  <span id="updateMsg" class="ub-msg">Checking for updates…</span>
+  <span id="updateProgress" class="ub-progress"></span>
+  <button id="btnUpdateDownload" style="display:none">⬇ Download Update</button>
+  <button id="btnUpdateInstall"  style="display:none">🔄 Restart &amp; Install</button>
+  <button id="btnUpdateDismiss">✕</button>
 </div>
 
 <script src="renderer.js"></script>
@@ -1036,5 +1302,7 @@
     inp.focus();
   }
 </script>
+
+
 </body>
 </html>
