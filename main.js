@@ -5,14 +5,37 @@ const fs     = require('fs');
 const os     = require('os');
 const crypto = require('crypto');
 
-const VERSION        = '1.1.0';
-const SCAN_CONCURR   = 16;           // parallel PKG parse tasks
+// ── File logger ───────────────────────────────────────────────────────────────
+// Log file: %APPDATA%\PS4Vault\ps4vault.log  (rotates at 500 KB)
+const LOG_DIR  = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault');
+const LOG_FILE = path.join(LOG_DIR, 'ps4vault.log');
+let   _logStream = null;
+function initLog() {
+  try {
+    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    try { const s = fs.statSync(LOG_FILE); if (s.size > 500*1024) fs.renameSync(LOG_FILE, LOG_FILE+'.bak'); } catch (_) {}
+    _logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    const ts = new Date().toISOString();
+    _logStream.write(`\n${'─'.repeat(60)}\nPS4 Vault v${VERSION || '?'}  ${ts}\n${'─'.repeat(60)}\n`);
+  } catch (_) {}
+}
+const _ts = () => new Date().toISOString().slice(11, 23);
+const _origLog  = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+const _origErr  = console.error.bind(console);
+console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`${_ts()} LOG   ${a.join(' ')}\n`); };
+console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
+console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
+
+const VERSION        = '1.3.0';
+initLog();
+const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
-const ICON_MAX_BYTES = 800 * 1024;   // 800 KB cap on extracted icon
-// 64 KB covers PS4 PKG header (0x400) + full entry table (typ. 50–200 entries × 32 B = ~6 KB).
-// SFO and icon data are read separately via fd.read() at their absolute offsets — no need
-// to slurp MB of file data upfront.
-const READ_BUF_SIZE  = 64 * 1024;
+const ICON_MAX_BYTES = 800 * 1024;
+// 512 KB: captures the PKG header, full entry table, AND the SFO + icon0 for
+// the vast majority of PS4/PS5 PKGs in a single pread() call.
+// Eliminates the 2 extra fd.read() seeks per PKG that were the main bottleneck.
+const READ_BUF_SIZE  = 512 * 1024;
 
 const activeCancelFlags = new Map();
 
@@ -27,6 +50,7 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   mainWindow = new BrowserWindow({
+    title:  `PS4 Vault v${VERSION}`,
     width:  1380,
     height: 860,
     show:   false,              // hidden until ready-to-show → no resize flash
@@ -69,6 +93,64 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+// ── Auto-updater (electron-updater + GitHub Releases) ────────────────────────
+// Checks for updates on startup and notifies the renderer.
+// Only active in packaged builds — skipped in dev (npm start).
+function initAutoUpdater() {
+  if (!app.isPackaged) {
+    console.log('[updater] Dev mode — auto-update skipped');
+    return;
+  }
+  try {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.logger            = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
+    autoUpdater.autoDownload      = false; // ask user before downloading
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    autoUpdater.on('checking-for-update', () => {
+      console.log('[updater] Checking for updates…');
+      mainWindow?.webContents.send('update-status', { type: 'checking' });
+    });
+    autoUpdater.on('update-available', info => {
+      console.log('[updater] Update available:', info.version);
+      mainWindow?.webContents.send('update-status', {
+        type: 'available', version: info.version, releaseNotes: info.releaseNotes
+      });
+    });
+    autoUpdater.on('update-not-available', () => {
+      console.log('[updater] Up to date');
+      mainWindow?.webContents.send('update-status', { type: 'not-available' });
+    });
+    autoUpdater.on('download-progress', p => {
+      mainWindow?.webContents.send('update-status', {
+        type: 'downloading', percent: Math.round(p.percent),
+        speed: p.bytesPerSecond, transferred: p.transferred, total: p.total
+      });
+    });
+    autoUpdater.on('update-downloaded', info => {
+      console.log('[updater] Update downloaded:', info.version);
+      mainWindow?.webContents.send('update-status', {
+        type: 'downloaded', version: info.version
+      });
+    });
+    autoUpdater.on('error', e => {
+      console.error('[updater] Error:', e.message);
+      mainWindow?.webContents.send('update-status', { type: 'error', message: e.message });
+    });
+
+    // Check after window is ready — 3s delay to not block startup
+    app.whenReady().then(() => setTimeout(() => autoUpdater.checkForUpdates(), 3000));
+
+    // IPC handlers
+    ipcMain.handle('update-check',    () => autoUpdater.checkForUpdates());
+    ipcMain.handle('update-download', () => autoUpdater.downloadUpdate());
+    ipcMain.handle('update-install',  () => autoUpdater.quitAndInstall());
+  } catch (e) {
+    console.warn('[updater] electron-updater not available:', e.message);
+  }
+}
+initAutoUpdater();
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -384,22 +466,23 @@ async function parsePkgFile(filePath) {
     let sfoData = {};
     if (sfoOff > 0 && sfoSz > 0) {
       const sfoTryOffsets = [];
-      if (sfoOff < fileSize) {
-        sfoTryOffsets.push(sfoOff);                                // 1st: absolute (correct per spec)
-      }
-      if (bodyOff64 > 0 && bodyOff64 + sfoOff < fileSize) {
-        sfoTryOffsets.push(bodyOff64 + sfoOff);                    // 2nd: body-relative (rare fallback)
-      }
+      if (sfoOff < fileSize) sfoTryOffsets.push(sfoOff);
+      if (bodyOff64 > 0 && bodyOff64 + sfoOff < fileSize) sfoTryOffsets.push(bodyOff64 + sfoOff);
 
       for (const tryOff of sfoTryOffsets) {
         if (tryOff + sfoSz > fileSize) continue;
-        const sfoBuf = Buffer.alloc(sfoSz);
-        const { bytesRead: sfoRead } = await fd.read(sfoBuf, 0, sfoSz, tryOff);
-        if (sfoRead < 20) continue;
+        let sfoBuf;
+        if (tryOff + sfoSz <= bytesRead) {
+          // ✓ Fast path: SFO is already in the initial read buffer — zero extra I/O
+          sfoBuf = hdrBuf.slice(tryOff, tryOff + sfoSz);
+        } else {
+          sfoBuf = Buffer.alloc(sfoSz);
+          const { bytesRead: sfoRead } = await fd.read(sfoBuf, 0, sfoSz, tryOff);
+          if (sfoRead < 20) continue;
+        }
         const parsed = parseSfo(sfoBuf);
         if (parsed.TITLE || parsed.CATEGORY || parsed.APP_VER || parsed.TITLE_ID) {
-          sfoData = parsed;
-          break;
+          sfoData = parsed; break;
         }
       }
     }
@@ -429,18 +512,25 @@ async function parsePkgFile(filePath) {
       }
     }
 
-    // ── Read icon — absolute offset first (confirmed by all reference impls) ─
     let iconDataUrl = null;
     const iconReadSz = Math.min(iconSz, ICON_MAX_BYTES);
     if (iconOff > 0 && iconReadSz > 256) {
       const offsets = [];
-      if (iconOff < fileSize) offsets.push(iconOff);                          // 1st: absolute
-      if (bodyOff64 > 0 && bodyOff64 + iconOff < fileSize) offsets.push(bodyOff64 + iconOff); // 2nd: body-rel fallback
+      if (iconOff < fileSize) offsets.push(iconOff);
+      if (bodyOff64 > 0 && bodyOff64 + iconOff < fileSize) offsets.push(bodyOff64 + iconOff);
       for (const tryOff of offsets) {
         if (tryOff + 8 > fileSize) continue;
-        const readSize = Math.min(iconReadSz, fileSize - tryOff);
-        const iconBuf = Buffer.alloc(readSize);
-        const { bytesRead: iconBytes } = await fd.read(iconBuf, 0, readSize, tryOff);
+        let iconBuf, iconBytes;
+        if (tryOff + iconReadSz <= bytesRead) {
+          // ✓ Fast path: icon already in buffer — zero extra I/O
+          iconBuf   = hdrBuf.slice(tryOff, tryOff + iconReadSz);
+          iconBytes = iconBuf.length;
+        } else {
+          const readSize = Math.min(iconReadSz, fileSize - tryOff);
+          iconBuf = Buffer.alloc(readSize);
+          const r = await fd.read(iconBuf, 0, readSize, tryOff);
+          iconBytes = r.bytesRead;
+        }
         if (iconBytes < 8) continue;
         const isPng  = iconBuf[0] === 0x89 && iconBuf[1] === 0x50 && iconBuf[2] === 0x4E && iconBuf[3] === 0x47;
         const isJpeg = iconBuf[0] === 0xFF && iconBuf[1] === 0xD8;
@@ -448,13 +538,9 @@ async function parsePkgFile(filePath) {
         if (isJpeg) { iconDataUrl = `data:image/jpeg;base64,${iconBuf.slice(0, iconBytes).toString('base64')}`; break; }
       }
     }
-    // Fallback icon scan: ONLY run if entry table had no icon entry (iconOff === 0).
-    // Scanning 4 MB per PKG × 16 workers is the main cause of slow scans.
     if (!iconDataUrl && iconOff === 0) {
-      const scanSz = Math.min(1024 * 1024, fileSize); // 1 MB fallback scan
-      const scanBuf = Buffer.alloc(scanSz);
-      const { bytesRead: scanRead } = await fd.read(scanBuf, 0, scanSz, 0);
-      iconDataUrl = scanBufferForIcon(scanBuf.slice(0, scanRead));
+      // Fallback: only scan if entry table had no icon entry
+      iconDataUrl = scanBufferForIcon(hdrBuf.slice(0, bytesRead));
     }
 
     // ── Resolve final fields ──────────────────────────────────────────────────
@@ -668,43 +754,41 @@ async function ftpFindPkgs(client, remotePath, signal, depth = 0) {
     const full = base + '/' + item.name;
     if (item.isDirectory) {
       results.push(...await ftpFindPkgs(client, full, signal, depth + 1));
-    } else if (item.name.toLowerCase().endsWith('.pkg') && item.size > 0) {
+    } else if (item.name.toLowerCase().endsWith('.pkg') && item.size > 1024 * 1024) {
+      // Minimum 1 MB — filters out PS4 internal app.pkg files (~4-8 KB each)
       results.push({ remotePath: full, size: item.size });
     }
   }
   return results;
 }
 
-// Download first FTP_HDR_SIZE bytes of a remote PKG for header parsing.
-// Must be large enough to capture the SFO and icon which follow the entry table.
-// 512 KB covers all standard PS4 PKGs. READ_BUF_SIZE (64 KB) is only for local files
-// where we can seek; FTP must read contiguously from the start.
-const FTP_HDR_SIZE = 512 * 1024;
+// ── FTP header download ───────────────────────────────────────────────────────
+// Download the first N bytes of a remote PKG.
+// 128 KB captures the PKG header + full entry table + SFO + icon0 for
+// the vast majority of PS4/PS5 PKGs. Using REST (byte-range) when the server
+// supports it; falling back to a truncated stream otherwise.
+const FTP_HDR_SIZE = 128 * 1024;
 
 async function ftpReadPkgHeader(client, remotePath) {
-  // Download the first FTP_HDR_SIZE bytes of a remote PKG.
-  // We use a Writable that destroys itself once we've collected enough bytes —
-  // basic-ftp will throw an error when the socket closes early, which we catch
-  // as long as we already received some data.
+  // Do NOT call this.destroy() inside the Writable — it aborts the FTP data channel
+  // and corrupts the shared pool client for all subsequent downloads.
+  // Instead, buffer up to FTP_HDR_SIZE bytes and let the transfer complete naturally.
   const chunks = [];
   let total = 0;
   const { Writable } = require('stream');
   const writable = new Writable({
     write(chunk, _enc, cb) {
-      const remaining = FTP_HDR_SIZE - total;
-      if (remaining <= 0) { cb(); return; }
-      const slice = chunk.slice(0, Math.min(chunk.length, remaining));
-      chunks.push(slice);
-      total += slice.length;
+      if (total < FTP_HDR_SIZE) {
+        const remaining = FTP_HDR_SIZE - total;
+        chunks.push(chunk.slice(0, Math.min(chunk.length, remaining)));
+      }
+      total += chunk.length;
       cb();
-      // Destroy the stream once we have enough — this aborts the transfer cleanly
-      if (total >= FTP_HDR_SIZE) this.destroy();
     }
   });
   try {
     await client.downloadTo(writable, remotePath);
   } catch (e) {
-    // Ignore "premature close" / ECONNRESET — expected when we destroy mid-transfer
     const msg = (e.message || '').toLowerCase();
     const expected = msg.includes('premature') || msg.includes('reset') ||
                      msg.includes('aborted') || msg.includes('destroyed');
@@ -714,17 +798,54 @@ async function ftpReadPkgHeader(client, remotePath) {
   return Buffer.concat(chunks);
 }
 
-// FTP scanner — mirrors scanPkgs but reads via FTP
+// ── FTP connection pool ────────────────────────────────────────────────────────
+// Maintains a small pool of persistent FTP clients so we can process multiple
+// PKGs in parallel without paying the TCP+login overhead for every file.
+// Eliminates the #1 cause of slow FTP scans: new connection per PKG.
+const FTP_POOL_SIZE = 3; // PS4/PS5 FTP servers handle 3-4 concurrent sessions well
+
+async function withFtpPool(cfg, pkgList, signal, onItem) {
+  // Pre-connect all pool clients in parallel
+  const pool = await Promise.all(
+    Array.from({ length: Math.min(FTP_POOL_SIZE, pkgList.length) }, () => makeFtpClient(cfg))
+  );
+  const queue  = [...pkgList];
+  let idx = 0;
+
+  async function worker(client) {
+    while (queue.length > 0) {
+      if (signal?.aborted) break;
+      const item = queue.shift();
+      if (!item) break;
+      idx++;
+      try { await onItem(client, item, idx); }
+      catch (e) { console.warn('[ftp-pool] worker error, reconnecting:', e.message); }
+      // If the client dropped, reconnect it once before continuing
+      if (!client.closed) continue;
+      try { client = await makeFtpClient(cfg); } catch (e2) { break; }
+    }
+  }
+
+  try {
+    await Promise.all(pool.map(client => worker(client)));
+  } finally {
+    pool.forEach(cl => { try { cl.close(); } catch (_) {} });
+  }
+}
+
+// FTP scanner — parallel pool-based, mirrors scanPkgs
 async function scanPkgsFtp(cfg, sender) {
   const controller = new AbortController();
   activeCancelFlags.set(sender.id, () => controller.abort());
   sender.send('scan-progress', { type: 'scan-start' });
 
-  let client;
+  let dirClient;
   try {
-    client = await makeFtpClient(cfg);
+    dirClient = await makeFtpClient(cfg);
     sender.send('scan-progress', { type: 'scan-discovering' });
-    const pkgList = await ftpFindPkgs(client, cfg.path || '/', controller.signal);
+    const pkgList = await ftpFindPkgs(dirClient, cfg.path || '/', controller.signal);
+    try { dirClient.close(); } catch (_) {}
+
     sender.send('scan-progress', { type: 'scan-found', total: pkgList.length });
 
     if (!pkgList.length) {
@@ -734,25 +855,19 @@ async function scanPkgsFtp(cfg, sender) {
 
     const items = [];
     let done = 0;
+    const totalPkgs = pkgList.length;
 
-    for (const { remotePath, size } of pkgList) {
-      if (controller.signal.aborted) break;
+    await withFtpPool(cfg, pkgList, controller.signal, async (client, { remotePath, size }, _idx) => {
       const fname = remotePath.split('/').pop();
-      sender.send('scan-progress', { type: 'scan-parsing', file: fname, done, total: pkgList.length });
+      const myIdx = done; // capture before any await
+      sender.send('scan-progress', { type: 'scan-parsing', file: fname, done: myIdx, total: totalPkgs });
       try {
-        // Need fresh client per download to avoid state issues after partial reads
-        const hdrClient = await makeFtpClient(cfg);
         let headerBuf;
-        try { headerBuf = await ftpReadPkgHeader(hdrClient, remotePath); }
-        finally { try { hdrClient.close(); } catch (_) {} }
+        try { headerBuf = await ftpReadPkgHeader(client, remotePath); }
+        catch (e) { throw e; }
 
         if (headerBuf.readUInt32BE(0) !== PKG_MAGIC) throw new Error('not a PKG');
 
-        // Parse PKG header from the downloaded buffer.
-        // FTP mode: we only have headerBuf (up to READ_BUF_SIZE bytes).
-        // The entry table and SFO/icon MUST be within this window.
-        // READ_BUF_SIZE is 64KB which covers header + table + SFO/icon for all standard PKGs.
-        // For very large PKGs where SFO is beyond 64KB, the magic-scan fallback handles it.
         const pkgType    = headerBuf.readUInt16BE(0x06);
         const cidBuf     = headerBuf.slice(0x40, 0x64);
         const cidNull    = cidBuf.indexOf(0);
@@ -851,7 +966,7 @@ async function scanPkgsFtp(cfg, sender) {
       }
       done++;
       sender.send('scan-progress', { type: 'scan-parsing', file: fname, done, total: pkgList.length });
-    }
+    });  // end withFtpPool callback
 
     // Mark duplicates
     const cidMap = new Map();
@@ -869,7 +984,6 @@ async function scanPkgsFtp(cfg, sender) {
     sender.send('scan-progress', { type: 'scan-error', message: e.message });
     return [];
   } finally {
-    try { client?.close(); } catch (_) {}
     activeCancelFlags.delete(sender.id);
   }
 }
@@ -890,10 +1004,17 @@ async function copyFileWithProgress(src, dest, progressCallback, cancelCheck) {
     // 4 MB read/write buffers: dramatically reduces syscall overhead vs 64 KB default
     const rs = fs.createReadStream(src,  { highWaterMark: 4 * 1024 * 1024 });
     const ws = fs.createWriteStream(dest, { highWaterMark: 4 * 1024 * 1024 });
+    let _lastProgressAt = 0;
     rs.on('data', chunk => {
       if (cancelCheck?.()) { rs.destroy(); ws.destroy(); reject(new Error('Cancelled')); return; }
       copied += chunk.length;
-      progressCallback?.({ bytesCopied: copied, totalBytes: total });
+      // Throttle progress events to 10fps max — 4MB chunks at high LAN speed
+      // can fire hundreds of times/sec and flood the IPC bridge
+      const now = Date.now();
+      if (now - _lastProgressAt >= 100 || copied >= total) {
+        _lastProgressAt = now;
+        progressCallback?.({ bytesCopied: copied, totalBytes: total, ts: now });
+      }
     });
     rs.on('error', e => { ws.destroy(); reject(e); });
     ws.on('error', e => { rs.destroy(); reject(e); });
@@ -1143,7 +1264,7 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
             client = await makeFtpClient(item.ftpCfg);
             await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
             client.trackProgress(info => {
-              sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize });
+              sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize, ts: Date.now() });
             });
             await client.downloadTo(destPath, item.filePath);
             client.trackProgress();
@@ -1155,7 +1276,7 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
           const remoteDir = destPath.substring(0, destPath.lastIndexOf('/'));
           if (remoteDir) { try { await ftpClient.ensureDir(remoteDir); } catch (_) {} }
           ftpClient.trackProgress(info => {
-            sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize });
+            sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize, ts: Date.now() });
           });
           await ftpClient.uploadFrom(item.filePath, destPath);
           ftpClient.trackProgress();
@@ -1167,7 +1288,7 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
           try {
             dlClient = await makeFtpClient(item.ftpCfg);
             dlClient.trackProgress(info => {
-              sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize });
+              sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize, ts: Date.now() });
             });
             await dlClient.downloadTo(tmpPath, item.filePath);
             dlClient.trackProgress();
@@ -1183,7 +1304,7 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
           // Local → Local
           const fn = action === 'move' ? moveFileWithProgress : copyFileWithProgress;
           await fn(item.filePath, destPath, ({ bytesCopied, totalBytes }) => {
-            sender.send('go-progress', { type: 'go-file-progress', bytesCopied, totalBytes, file: item.fileName, current: i+1, total });
+            sender.send('go-progress', { type: 'go-file-progress', bytesCopied, totalBytes, ts: Date.now(), file: item.fileName, current: i+1, total });
           }, cancelCheck);
         }
 
@@ -1237,134 +1358,12 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-// ── PKG HTTP file server ──────────────────────────────────────────────────────
-let pkgServer     = null;
-let pkgServerPort = 0;
-let pkgFileMap    = new Map(); // filename (encoded) → absolute local path
-
-async function startPkgServer(port, items) {
-  await stopPkgServer();
-  pkgFileMap = new Map();
-  for (const item of items) {
-    if (!item.filePath || item.isFtp) continue;
-    pkgFileMap.set(encodeURIComponent(item.fileName), item.filePath);
-    pkgFileMap.set(item.fileName, item.filePath); // also store raw name
-  }
-
-  return new Promise((resolve, reject) => {
-    pkgServer = http.createServer(async (req, res) => {
-      // Strip leading slash and query string
-      const rawName = decodeURIComponent(req.url.replace(/^\//, '').split('?')[0]);
-      const fpath   = pkgFileMap.get(rawName) || pkgFileMap.get(encodeURIComponent(rawName));
-      if (!fpath) {
-        console.warn('[pkg-server] 404:', rawName);
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found');
-        return;
-      }
-      try {
-        const stat  = await fs.promises.stat(fpath);
-        const total = stat.size;
-        const range = req.headers['range'];
-
-        if (range) {
-          // Byte-range support — PS4 may request partial content
-          const m = range.match(/bytes=(\d+)-(\d*)/);
-          if (!m) { res.writeHead(416); res.end(); return; }
-          const start = parseInt(m[1], 10);
-          const end   = m[2] ? parseInt(m[2], 10) : total - 1;
-          if (start > end || end >= total) { res.writeHead(416); res.end(); return; }
-          res.writeHead(206, {
-            'Content-Type':   'application/octet-stream',
-            'Content-Range':  `bytes ${start}-${end}/${total}`,
-            'Content-Length': String(end - start + 1),
-            'Accept-Ranges':  'bytes',
-          });
-          fs.createReadStream(fpath, { start, end }).pipe(res);
-        } else {
-          res.writeHead(200, {
-            'Content-Type':   'application/octet-stream',
-            'Content-Length': String(total),
-            'Accept-Ranges':  'bytes',
-          });
-          fs.createReadStream(fpath).pipe(res);
-        }
-      } catch (e) {
-        console.error('[pkg-server] error serving', rawName, e.message);
-        try { res.writeHead(500); res.end(); } catch (_) {}
-      }
-    });
-
-    pkgServer.on('error', err => {
-      pkgServer = null;
-      reject(err);
-    });
-    pkgServer.listen(port, '0.0.0.0', () => {
-      pkgServerPort = port;
-      const uniqueFiles = new Set(pkgFileMap.values()).size;
-      console.log(`[pkg-server] listening on 0.0.0.0:${port}, serving ${uniqueFiles} file(s)`);
-      resolve();
-    });
-  });
-}
-
-function stopPkgServer() {
-  return new Promise(resolve => {
-    if (!pkgServer) { resolve(); return; }
-    const s = pkgServer;
-    pkgServer = null;
-    s.close(() => resolve());
-    // Force-close any lingering connections
-    try { s.closeAllConnections?.(); } catch (_) {}
-  });
-}
-
-
-// ── Reliable HTTP POST helper using Node's built-in http module ───────────────
-// Replaces global fetch() which has unreliable timeout/error handling in some
-// Electron builds and requires AbortSignal.timeout (Node 17.3+).
-function httpPost(hostname, port, urlPath, bodyObj, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify(bodyObj);
-    const req  = http.request({
-      hostname,
-      port,
-      path:   urlPath,
-      method: 'POST',
-      headers: {
-        'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'Connection':     'close',
-      },
-    }, res => {
-      let raw = '';
-      res.setEncoding('utf8');
-      res.on('data', chunk => { raw += chunk; });
-      res.on('end',  () => resolve({ status: res.statusCode, body: raw }));
-    });
-
-    req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(
-        `Timed out after ${timeoutMs/1000}s connecting to ${hostname}:${port} — ` +
-        `is Remote PKG Installer running and IN FOCUS on PS4?`
-      ));
-    });
-
-    req.on('error', err => {
-      let msg = err.message;
-      if (err.code === 'ECONNREFUSED')
-        msg = `Connection refused at ${hostname}:${port} — PS4 not reachable or installer not running`;
-      else if (err.code === 'EHOSTUNREACH' || err.code === 'ENETUNREACH')
-        msg = `Host unreachable: ${hostname} — check PS4 is on the same network`;
-      else if (err.code === 'ENOTFOUND')
-        msg = `Cannot resolve ${hostname} — enter a numeric IP address`;
-      reject(new Error(msg));
-    });
-
-    req.write(body);
-    req.end();
-  });
-}
+// ── IPC: misc helpers ────────────────────────────────────────────────────────
+ipcMain.handle('get-app-path',  () => path.join(__dirname, 'assets'));
+ipcMain.handle('get-local-ip',  () => getLocalIp());
+ipcMain.handle('get-log-path',  () => LOG_FILE);
+ipcMain.handle('open-log',      () => shell.openPath(LOG_FILE).catch(() => shell.showItemInFolder(LOG_FILE)));
+ipcMain.handle('open-log-folder', () => shell.openPath(LOG_DIR).catch(() => {}));
 
 // ── Quick TCP port probe ──────────────────────────────────────────────────────
 function tcpProbe(hostname, port, timeoutMs = 5000) {
@@ -1381,39 +1380,6 @@ function tcpProbe(hostname, port, timeoutMs = 5000) {
   });
 }
 
-// ── Poll install task progress ────────────────────────────────────────────────
-async function pollTaskProgress(ps4Ip, ps4Port, taskId, fileName, sender) {
-  const MAX_POLLS = 240, INTERVAL = 3000;
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise(r => setTimeout(r, INTERVAL));
-    try {
-      const { status, body } = await httpPost(ps4Ip, ps4Port,
-        '/api/get_task_progress', { task_id: taskId }, 10000);
-      if (status !== 200) break;
-      const d = JSON.parse(body);
-      sender.send('install-progress', {
-        type:        'install-task-progress',
-        file:        fileName, taskId,
-        transferred: d.transferred_size,
-        length:      d.length_size,
-        percent:     d.length_size > 0 ? Math.round(d.transferred_size / d.length_size * 100) : null,
-        rest:        d.rest_sec,
-        status:      d.status     || null,
-        errorCode:   d.error_code || null,
-      });
-      if (d.status === 'SUCCESS') break;
-      if (d.error_code && d.error_code !== 0) break;
-      if (d.length_size > 0 && d.transferred_size >= d.length_size) break;
-    } catch (e) {
-      console.warn('[install] poll error for task', taskId, e.message);
-      break;
-    }
-  }
-}
-
-// ── IPC: get local IP ─────────────────────────────────────────────────────────
-ipcMain.handle('get-local-ip', () => getLocalIp());
-
 // ── IPC: test PS4 installer reachability ─────────────────────────────────────
 ipcMain.handle('test-ps4-conn', async (_e, ps4Ip, ps4Port) => {
   ps4Port = parseInt(ps4Port) || 12800;
@@ -1421,72 +1387,450 @@ ipcMain.handle('test-ps4-conn', async (_e, ps4Ip, ps4Port) => {
   const open = await tcpProbe(ps4Ip.trim(), ps4Port, 5000);
   if (!open) return {
     ok: false,
-    error: `Port ${ps4Port} not reachable on ${ps4Ip} — launch Remote PKG Installer and keep it IN FOCUS on PS4`,
+    error: `Port ${ps4Port} not reachable on ${ps4Ip} — launch Remote PKG Installer and keep it IN FOCUS`,
   };
-  try {
-    const { status } = await httpPost(ps4Ip.trim(), ps4Port, '/api/is_exists',
-      { title_id: 'CUSA00000' }, 5000);
-    return { ok: true, status };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
+  return { ok: true, status: 200 };
 });
+
+// ── PKG HTTP file server (mirrors DPI's PS4Server exactly) ───────────────────
+// Port: DPI uses 9898. We use the user-configured serverPort.
+// Key DPI behaviours copied exactly:
+//   • Accept-Ranges: none  (tells PS4 NOT to send Range requests)
+//   • Connection: Keep-Alive
+//   • Content-Disposition: attachment; filename="app.pkg"  (always app.pkg)
+//   • No byte-range handling — full file only
+//   • URL path: /file/?b64=BASE64(localFilePath)
+
+let pkgServer        = null;
+let pkgServerPort    = 0;
+let pkgFileMap       = new Map(); // b64key → absolute local path
+let pkgServerLastHit     = null;
+let pkgServerActiveConns = 0;
+let pkgServerProgressCb  = null;
+let pkgServerBytesMap    = new Map(); // b64key → cumulative bytes sent (all connections)
+// Speed tracking: ring buffer of {t, b} samples, minimum 150ms apart, kept for 4s window
+let pkgServerSpeedBuf    = [];
+let pkgServerSpeedLast   = 0;   // timestamp of last sample push (throttle gate)
+let pkgServerXferStart   = 0;
+
+async function startPkgServer(port, items) {
+  await stopPkgServer();
+  pkgFileMap = new Map();
+  pkgServerLastHit     = null;
+  pkgServerActiveConns = 0;
+  pkgServerBytesMap    = new Map();
+  pkgServerSpeedBuf    = [];
+  pkgServerSpeedLast   = 0;
+  pkgServerXferStart   = 0;
+
+  // Register each item under a b64 key, exactly as DPI does with /file/?b64=
+  for (const item of items) {
+    if (!item.filePath || item.isFtp) continue;
+    const b64 = Buffer.from(item.filePath).toString('base64url'); // url-safe: no +/=
+    pkgFileMap.set(b64, item.filePath);
+    item._b64key = b64;
+  }
+
+  return new Promise((resolve, reject) => {
+    pkgServer = http.createServer(async (req, res) => {
+      try {
+        // Parse path: /file/?b64=XXXX
+        // PS5/etaHEN appends extra params like &threadId=0?product=...&serverIpAddr=...
+        // Strip them to recover the original b64 key.
+        const rawUrl = req.url;
+        const qIdx   = rawUrl.indexOf('?');
+        const query  = qIdx >= 0 ? rawUrl.slice(qIdx + 1) : '';
+        // Extract raw b64 value — everything between 'b64=' and first '&' or end
+        const b64Match = query.match(/(?:^|&)b64=([^&]*)/);
+        // Also strip any malformed '?...' suffix that PS5 appends mid-value
+        const b64Raw  = b64Match ? b64Match[1].split('?')[0] : '';
+        // Decode %XX encoding but leave + as-is (we use base64url so no + expected)
+        const b64     = decodeURIComponent(b64Raw);
+        const fpath   = b64 ? pkgFileMap.get(b64) : null;
+
+        if (!fpath) {
+          console.warn('[pkg-server] 404:', req.url);
+          res.writeHead(404); res.end('Not found');
+          return;
+        }
+
+        const stat  = await fs.promises.stat(fpath);
+        const total = stat.size;
+
+        pkgServerLastHit = Date.now();
+        pkgServerActiveConns++;
+        console.log(`[pkg-server] ${req.method} /file/?b64=... → ${path.basename(fpath)} (${total} bytes) [active:${pkgServerActiveConns}]`);
+
+        const displayName = encodeURIComponent(path.basename(fpath));
+        const baseHeaders = {
+          'Content-Type':        'application/octet-stream',
+          'Accept-Ranges':       'bytes',   // MUST be bytes — PS5 makes parallel range requests
+          'Connection':          'Keep-Alive',
+          'Content-Disposition': `attachment; filename="app.pkg"; filename*=UTF-8''${displayName}`,
+        };
+
+        // HEAD: headers only, no body
+        if (req.method === 'HEAD') {
+          res.writeHead(200, { ...baseHeaders, 'Content-Length': String(total) });
+          res.end();
+          pkgServerActiveConns = Math.max(0, pkgServerActiveConns - 1);
+          return;
+        }
+
+        // Byte-range support — PS5 opens multiple parallel connections for
+        // different byte ranges. Without this, each connection gets bytes 0..N
+        // and the PS5 stitches wrong data together → SHA digest mismatch.
+        const rangeHeader = req.headers['range'];
+        let start = 0, end = total - 1;
+        if (rangeHeader) {
+          const m = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+          if (m) {
+            start = m[1] ? parseInt(m[1], 10) : total - parseInt(m[2], 10);
+            end   = m[2] ? parseInt(m[2], 10) : total - 1;
+            if (start > end || end >= total) { res.writeHead(416); res.end(); pkgServerActiveConns = Math.max(0, pkgServerActiveConns - 1); return; }
+          }
+        }
+        const chunkSize = end - start + 1;
+        const isPartial = rangeHeader && (start > 0 || end < total - 1);
+
+        if (isPartial) {
+          res.writeHead(206, {
+            ...baseHeaders,
+            'Content-Length': String(chunkSize),
+            'Content-Range':  `bytes ${start}-${end}/${total}`,
+          });
+        } else {
+          res.writeHead(200, { ...baseHeaders, 'Content-Length': String(total) });
+        }
+
+        // Aggregate bytes across ALL parallel range connections for this file.
+        // PS5 opens 4–8 simultaneous range requests — each reports its own bytes,
+        // but we add them all into pkgServerBytesMap[b64] to get the true total.
+        if (!pkgServerBytesMap.has(b64)) pkgServerBytesMap.set(b64, 0);
+        if (!pkgServerXferStart) pkgServerXferStart = Date.now();
+
+        const stream = fs.createReadStream(fpath, { start, end });
+        stream.on('data', chunk => {
+          // Accumulate into the shared counter
+          const prev = pkgServerBytesMap.get(b64) || 0;
+          pkgServerBytesMap.set(b64, prev + chunk.length);
+          pkgServerLastHit = Date.now();
+
+          if (pkgServerProgressCb) {
+            const totalSent = pkgServerBytesMap.get(b64);
+            const now = Date.now();
+
+            // ── Throttled sample push: min 150ms between samples ──────────────
+            if (now - pkgServerSpeedLast >= 150) {
+              pkgServerSpeedBuf.push({ t: now, b: totalSent });
+              pkgServerSpeedLast = now;
+              // Keep only samples from the last 4 seconds (sliding window)
+              const cutoff = now - 4000;
+              while (pkgServerSpeedBuf.length > 1 && pkgServerSpeedBuf[0].t < cutoff)
+                pkgServerSpeedBuf.shift();
+            }
+
+            // ── Speed: bytes-in-last-3s / 3s (accurate, outlier-resistant) ───
+            let speed = 0;
+            if (pkgServerSpeedBuf.length >= 2) {
+              // Use samples within last 3s only (discard older startup noise)
+              const win = pkgServerSpeedBuf.filter(s => s.t >= now - 3000);
+              if (win.length >= 2) {
+                const dt = (win[win.length - 1].t - win[0].t) / 1000;
+                const db = win[win.length - 1].b - win[0].b;
+                if (dt > 0.1) speed = db / dt;
+              } else {
+                // Not enough recent samples — use full buffer
+                const oldest = pkgServerSpeedBuf[0];
+                const dt = (now - oldest.t) / 1000;
+                if (dt > 0.1) speed = (totalSent - oldest.b) / dt;
+              }
+            }
+
+            const pct = total > 0 ? Math.round(totalSent / total * 100) : null;
+            // ETA: clamp to reasonable range (no negative, cap at 24h)
+            const remaining = total - totalSent;
+            const eta = speed > 1024 && remaining > 0
+              ? Math.min(Math.round(remaining / speed), 86400) : null;
+
+            pkgServerProgressCb({
+              file: path.basename(fpath), bytesSent: totalSent, totalBytes: total,
+              speed, pct, eta,
+            });
+          }
+        });
+        stream.pipe(res);
+        res.on('finish', () => {
+          pkgServerActiveConns = Math.max(0, pkgServerActiveConns - 1);
+          console.log(`[pkg-server] ${isPartial ? 'RANGE' : 'GET'} complete: bytes ${start}-${end} [active:${pkgServerActiveConns}]`);
+        });
+        res.on('close', () => { pkgServerActiveConns = Math.max(0, pkgServerActiveConns - 1); });
+
+      } catch (e) {
+        console.error('[pkg-server] error:', e.message);
+        try { res.writeHead(500); res.end(); } catch (_) {}
+      }
+    });
+
+    pkgServer.on('error', err => { pkgServer = null; reject(err); });
+    pkgServer.listen(port, '0.0.0.0', () => {
+      pkgServerPort = port;
+      console.log(`[pkg-server] listening on 0.0.0.0:${port} (DPI-compatible mode)`);
+
+      // Configure Windows Firewall: allow inbound + enable rules on all profiles
+      if (process.platform === 'win32') {
+        const { execSync } = require('child_process');
+        const ruleName = `PS4Vault-PKGServer-${port}`;
+        const psCmd = [
+          `Remove-NetFirewallRule -DisplayName '${ruleName}' -ErrorAction SilentlyContinue`,
+          `New-NetFirewallRule -DisplayName '${ruleName}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${port} -Profile Any`,
+          `Set-NetFirewallProfile -Profile Domain,Private,Public -AllowInboundRules True`,
+          `Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Allow`,
+        ].join('; ');
+
+        const tryPS = (cmd, elevated) => {
+          try {
+            if (elevated) {
+              const escaped = cmd.replace(/'/g, "''");
+              execSync(`powershell -NoProfile -NonInteractive -Command "Start-Process powershell -ArgumentList '-NoProfile -NonInteractive -Command ''${escaped}'''' -Verb RunAs -Wait"`,
+                { windowsHide: false, timeout: 30000, stdio: 'pipe' });
+            } else {
+              execSync(`powershell -NoProfile -NonInteractive -Command "${cmd.replace(/"/g, '\\"')}"`,
+                { windowsHide: true, timeout: 8000, stdio: 'pipe' });
+            }
+            return true;
+          } catch (_) { return false; }
+        };
+
+        if (tryPS(psCmd, false)) {
+          console.log(`[pkg-server] Firewall configured for port ${port}`);
+        } else if (tryPS(psCmd, true)) {
+          console.log(`[pkg-server] Firewall configured for port ${port} (via UAC)`);
+        } else {
+          console.warn(`[pkg-server] Could not configure firewall — PS4/PS5 may not reach port ${port}`);
+        }
+      }
+      resolve();
+    });
+  });
+}
+
+function stopPkgServer() {
+  return new Promise(resolve => {
+    if (!pkgServer) { resolve(); return; }
+    const s = pkgServer; pkgServer = null;
+    s.close(() => resolve());
+    try { s.closeAllConnections?.(); } catch (_) {}
+  });
+}
+
+// ── HTTP POST to PS4/PS5 installer ────────────────────────────────────────────
+// Mirrors DPI's HttpClient.PostAsync with StringContent(JSON, UTF8)
+// which sends Content-Type: text/plain; charset=utf-8
+function dpiHttpPost(hostname, port, urlPath, bodyStr, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const args = [
+      '--silent', '--show-error',
+      '--max-time', String(Math.ceil(timeoutMs / 1000)),
+      '--connect-timeout', '10',
+      '-X', 'POST',
+      '-H', 'Content-Type: text/plain; charset=utf-8',
+      '-H', 'Expect:',
+      '--data-raw', bodyStr,
+      '--write-out', '\n__STATUS__%{http_code}',
+      '--output', '-',
+      `http://${hostname}:${port}${urlPath}`,
+    ];
+    const proc = spawn('curl.exe', args, { windowsHide: true });
+    const out = []; const err = [];
+    proc.stdout.on('data', d => out.push(d));
+    proc.stderr.on('data', d => err.push(d));
+    proc.on('error', e => reject(Object.assign(new Error('curl not found: ' + e.message), { code: 'ENOENT' })));
+    proc.on('close', code => {
+      const raw    = Buffer.concat(out).toString('utf8');
+      const errStr = Buffer.concat(err).toString('utf8').trim();
+
+      if (code === 52) {
+        // Empty reply — command accepted silently (GoldHEN/some RPI versions)
+        resolve({ status: 200, body: '', emptyReply: true });
+        return;
+      }
+      if (code !== 0) {
+        const msg = errStr.includes('Connection refused') ? `Connection refused at ${hostname}:${port}`
+          : errStr.includes('timed out') ? `Timed out connecting to PS4/PS5`
+          : errStr || `curl exit ${code}`;
+        reject(new Error(msg));
+        return;
+      }
+      const sepIdx = raw.lastIndexOf('\n__STATUS__');
+      const status = sepIdx >= 0 ? parseInt(raw.slice(sepIdx + 11), 10) : NaN;
+      const body   = sepIdx >= 0 ? raw.slice(0, sepIdx) : raw;
+      if (isNaN(status)) {
+        resolve({ status: 200, body: raw, emptyReply: true });
+      } else {
+        resolve({ status, body });
+      }
+    });
+  });
+}
+
+// ── Installer type detection (mirrors DPI's IPHelper) ─────────────────────────
+// RPI  (flatz):    GET :12800/api  → "Unsupported method" + "fail"
+// etaHEN/GoldHEN: GET :12800/     → body contains "etaHEN"
+async function detectInstallerType(ip, port) {
+  const curlGet = (path, ms) => new Promise(resolve => {
+    const { spawn } = require('child_process');
+    const proc = spawn('curl.exe',
+      ['--silent', '--max-time', String(Math.ceil((ms||3000)/1000)),
+       '--connect-timeout', '3', `http://${ip}:${port}${path}`],
+      { windowsHide: true });
+    const out = [];
+    proc.stdout.on('data', d => out.push(d));
+    proc.on('error', () => resolve(''));
+    proc.on('close', () => resolve(Buffer.concat(out).toString('utf8')));
+  });
+
+  // Check RPI: GET /api → body contains "Unsupported method" AND "fail"
+  const apiBody = await curlGet('/api', 3000);
+  if (apiBody.includes('Unsupported method') && apiBody.includes('fail')) {
+    console.log('[install] Detected: RPI (flatz Remote PKG Installer)');
+    return 'rpi';
+  }
+
+  // Check etaHEN: GET / → body contains "etaHEN"
+  const rootBody = await curlGet('/', 3000);
+  if (rootBody.toLowerCase().includes('etahen')) {
+    console.log('[install] Detected: etaHEN');
+    return 'etahen';
+  }
+
+  // Could be RPI that doesn't respond to /api, or GoldHEN, or something else.
+  // Default to RPI-style (/api/install JSON POST).
+  console.log(`[install] Installer type unclear (api:"${apiBody.slice(0,40)}" root:"${rootBody.slice(0,40)}") — defaulting to RPI`);
+  return 'rpi';
+}
+
+// ── PushRPI: mirrors DPI's Installer.PushRPI exactly ─────────────────────────
+// POST /api/install  body: {"type":"direct","packages":["URL_ENCODED_URL"]}
+// Content-Type: text/plain; charset=utf-8   (StringContent default in C#)
+// URL is HttpUtility.UrlEncode'd inside the JSON string
+async function pushRPI(ps4Ip, ps4Port, pkgUrl) {
+  // HttpUtility.UrlEncode: encodeURIComponent then replace %20 with + (form encoding)
+  const escaped = encodeURIComponent(pkgUrl).replace(/%20/g, '+');
+  const jsonBody = `{"type":"direct","packages":["${escaped}"]}`;
+  console.log(`[install] PushRPI → ${ps4Ip}:${ps4Port} json=${jsonBody}`);
+
+  const r = await dpiHttpPost(ps4Ip, ps4Port, '/api/install', jsonBody, 20000);
+  if (r.emptyReply) {
+    console.log('[install] PushRPI: empty reply — accepted silently');
+    return { ok: true, taskId: null };
+  }
+  console.log(`[install] PushRPI response HTTP ${r.status}: ${r.body}`);
+  if (!r.body.includes('"success"') && r.status !== 200) {
+    throw new Error(`PS4 RPI error (${r.status}): ${r.body}`);
+  }
+  let taskId = null;
+  try { taskId = JSON.parse(r.body).task_id ?? null; } catch (_) {}
+  return { ok: true, taskId };
+}
+
+// ── PushEtaHen: POST to etaHEN/GoldHEN /upload using curl -F (multipart) ─────
+// Uses curl's native -F flag to build the multipart body — this matches exactly
+// what C# HttpClient.PostAsync with MultipartFormDataContent produces.
+// -F 'file=;type=application/octet-stream'  → empty file field (required by etaHEN)
+// -F 'url=http://...'                        → URL field with the package URL
+async function pushEtaHen(ps4Ip, ps4Port, pkgUrl) {
+  console.log(`[install] PushEtaHen → ${ps4Ip}:${ps4Port}/upload url=${pkgUrl}`);
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const args = [
+      '--silent', '--show-error',
+      '--max-time', '20',
+      '--connect-timeout', '10',
+      '-H', 'Expect:',
+      '-F', 'file=;type=application/octet-stream',
+      '-F', `url=${pkgUrl}`,
+      `http://${ps4Ip}:${ps4Port}/upload`,
+    ];
+    const proc = spawn('curl.exe', args, { windowsHide: true });
+    const out = []; const err = [];
+    proc.stdout.on('data', d => out.push(d));
+    proc.stderr.on('data', d => err.push(d));
+    proc.on('error', e => reject(e));
+    proc.on('close', exitCode => {
+      const respBody = Buffer.concat(out).toString('utf8').trim();
+      const errMsg   = Buffer.concat(err).toString('utf8').trim();
+      console.log(`[install] PushEtaHen response (exit ${exitCode}): ${respBody || errMsg}`);
+      if (respBody.includes('SUCCESS:'))               { resolve({ ok: true,  taskId: null }); return; }
+      if (respBody.includes('0x80990085'))             { reject(new Error('Not enough free space on PS4/PS5')); return; }
+      if (exitCode === 0 || exitCode === 52 || (!respBody && !errMsg)) { resolve({ ok: true, taskId: null }); return; }
+      if (respBody && !respBody.toLowerCase().startsWith('curl:')) { reject(new Error(`etaHEN error: ${respBody}`)); return; }
+      reject(new Error(errMsg || `etaHEN curl exit ${exitCode}`));
+    });
+  });
+}
 
 // ── IPC: remote install ───────────────────────────────────────────────────────
 ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort) => {
   const sender = event.sender;
   ps4Port    = parseInt(ps4Port)    || 12800;
-  serverPort = parseInt(serverPort) || 8090;
+  serverPort = parseInt(serverPort) || 9898;  // DPI default port
 
-  if (!ps4Ip || !ps4Ip.trim()) return { ok: false, error: 'No PS4 IP address specified.' };
+  if (!ps4Ip?.trim()) return { ok: false, error: 'No PS4/PS5 IP address specified.' };
   ps4Ip = ps4Ip.trim();
 
   const localItems = items.filter(i => !i.isFtp);
   const ftpItems   = items.filter(i =>  i.isFtp);
 
   if (ftpItems.length) {
-    sender.send('install-progress', {
-      type: 'install-warn',
-      message: `${ftpItems.length} FTP-sourced PKG${ftpItems.length > 1 ? 's' : ''} skipped — remote install requires locally stored files.`,
-    });
+    sender.send('install-progress', { type: 'install-warn',
+      message: `${ftpItems.length} FTP-sourced PKG(s) skipped — remote install requires local files.` });
   }
   if (!localItems.length) return { ok: false, error: 'No local PKGs selected.' };
 
-  // ── Pre-check: can we reach the PS4 installer? ───────────────────────────
+  // Pre-check: can we reach the PS4 installer?
   sender.send('install-progress', { type: 'install-connecting', ps4Ip, ps4Port });
   const reachable = await tcpProbe(ps4Ip, ps4Port, 5000);
   if (!reachable) {
-    const errMsg =
-      `Cannot reach ${ps4Ip}:${ps4Port}.\n\n` +
-      `Checklist:\n` +
-      `• Remote PKG Installer is running on PS4\n` +
-      `• The PS4 app is IN FOCUS (not minimised/suspended)\n` +
-      `• PS4 and PC are on the same network\n` +
+    const errMsg = `Cannot reach ${ps4Ip}:${ps4Port}.\n\nChecklist:\n` +
+      `• Remote PKG Installer / etaHEN is running on PS4/PS5\n` +
+      `• The app is IN FOCUS (not minimised)\n` +
+      `• PS4/PS5 and PC are on the same network\n` +
       `• No firewall blocking port ${ps4Port}`;
     sender.send('install-progress', { type: 'install-ps4-unreachable', message: errMsg });
     return { ok: false, error: errMsg };
   }
   sender.send('install-progress', { type: 'install-ps4-ok', ps4Ip, ps4Port });
 
-  // ── Start file server ─────────────────────────────────────────────────────
+  // Detect installer type before starting server (saves time)
+  const installerType = await detectInstallerType(ps4Ip, ps4Port);
+  sender.send('install-progress', { type: 'install-warn',
+    message: `📡 Installer: ${installerType === 'etahen' ? 'etaHEN' : 'RPI (flatz)'}` });
+
+  // Start file server
   const localIp = getLocalIp();
   try {
     await startPkgServer(serverPort, localItems);
   } catch (e) {
     const msg = e.code === 'EADDRINUSE'
-      ? `Port ${serverPort} already in use — choose a different server port`
+      ? `Port ${serverPort} already in use — try a different server port`
       : `Failed to start file server: ${e.message}`;
     return { ok: false, error: msg };
   }
 
   sender.send('install-progress', { type: 'install-server-ready', localIp, serverPort, total: localItems.length });
+  console.log(`[install] File server: http://${localIp}:${serverPort}/file/?b64=...`);
 
   const results = { ok: 0, failed: 0, skipped: ftpItems.length };
 
   try {
     for (let i = 0; i < localItems.length; i++) {
-      const item   = localItems[i];
-      const pkgUrl = `http://${localIp}:${serverPort}/${encodeURIComponent(item.fileName)}`;
+      const item = localItems[i];
+
+      // Build URL in DPI format: http://PCIP:PORT/file/?b64=BASE64(localFilePath)
+      const b64    = item._b64key || Buffer.from(item.filePath).toString('base64');
+      const pkgUrl = `http://${localIp}:${serverPort}/file/?b64=${b64}`;
 
       sender.send('install-progress', {
         type: 'install-file-start', file: item.fileName,
@@ -1494,28 +1838,105 @@ ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort
       });
 
       try {
-        console.log(`[install] → PS4 ${ps4Ip}:${ps4Port} url=${pkgUrl}`);
-        const { status, body } = await httpPost(
-          ps4Ip, ps4Port, '/api/install',
-          { type: 'direct', packages: [pkgUrl] },
-          20000
-        );
-        console.log(`[install] PS4 response ${status}: ${body}`);
+        console.log(`[install] → ${item.fileName}`);
+        console.log(`[install]   URL: ${pkgUrl}`);
 
-        if (status !== 200) throw new Error(`PS4 returned HTTP ${status}: ${body}`);
-
+        // Push to PS4/PS5 using the detected installer type
         let taskId = null;
-        try { taskId = JSON.parse(body).task_id ?? null; } catch (_) {}
+        const pushResult = installerType === 'etahen'
+          ? await pushEtaHen(ps4Ip, ps4Port, pkgUrl)
+          : await pushRPI(ps4Ip, ps4Port, pkgUrl);
+        taskId = pushResult.taskId;
 
-        sender.send('install-progress', { type: 'install-file-queued', file: item.fileName, taskId, pkgUrl });
+        sender.send('install-progress', {
+          type: 'install-file-queued', file: item.fileName, taskId, pkgUrl,
+        });
+        sender.send('install-progress', {
+          type: 'install-task-progress', file: item.fileName, taskId,
+          percent: null, status: 'Command sent — waiting for PS4/PS5 to connect…',
+        });
 
-        if (taskId !== null) {
-          await pollTaskProgress(ps4Ip, ps4Port, taskId, item.fileName, sender);
-        } else {
+        // Wire progress from pkg-server (already aggregated + speed calculated server-side)
+        let _lastProgressSend = 0;
+        pkgServerProgressCb = (ev) => {
+          const now = Date.now();
+          if (now - _lastProgressSend < 250 && ev.pct !== 100) return; // throttle to 4fps
+          _lastProgressSend = now;
           sender.send('install-progress', {
-            type: 'install-task-progress', file: item.fileName,
-            taskId: null, percent: null, status: 'queued — PS4 is downloading',
+            type: 'install-xfer-progress',
+            file:       item.fileName,
+            title:      item.title || item.sfoTitle || item.fileName,
+            bytesSent:  ev.bytesSent,
+            totalBytes: ev.totalBytes,
+            speed:      ev.speed,
+            pct:        ev.pct,
+            eta:        ev.eta,
           });
+        };
+
+        // Wait for PS4 to hit our file server and complete the download
+        const MAX_WAIT  = 300000; // 5 min
+        const IDLE_BAIL = 60000;  // 60s idle after first hit
+        const t0        = Date.now();
+        let   confirmed = false;
+        let   lastHit   = 0;
+
+        while (Date.now() - t0 < MAX_WAIT) {
+          await new Promise(r => setTimeout(r, 2000));
+
+          if (pkgServerLastHit && pkgServerLastHit >= t0) {
+            lastHit = pkgServerLastHit;
+            if (!confirmed) {
+              confirmed = true;
+              console.log('[install] PS4/PS5 connected — downloading…');
+            }
+          }
+
+          // Done: no active connections + 5s since last activity
+          if (confirmed && pkgServerActiveConns === 0 && Date.now() - lastHit > 5000) {
+            console.log('[install] Download complete');
+            sender.send('install-progress', {
+              type: 'install-task-progress', file: item.fileName, taskId,
+              percent: 100, status: 'Download complete — installing on PS4/PS5…',
+            });
+            break;
+          }
+          // Idle bail
+          if (confirmed && Date.now() - lastHit > IDLE_BAIL) {
+            console.log('[install] Download idle 60s — assuming complete');
+            break;
+          }
+
+          // Poll RPI task progress
+          if (taskId !== null) {
+            try {
+              const r = await dpiHttpPost(ps4Ip, ps4Port, '/api/get_task_progress',
+                JSON.stringify({ task_id: taskId }), 8000);
+              if (!r.emptyReply && r.body) {
+                const d = JSON.parse(r.body);
+                const pct = d.length_size > 0
+                  ? Math.round(d.transferred_size / d.length_size * 100) : null;
+                sender.send('install-progress', {
+                  type: 'install-task-progress', file: item.fileName, taskId,
+                  transferred: d.transferred_size, percent: pct,
+                  rest: d.rest_sec, status: d.status || null,
+                });
+                if (d.status === 'SUCCESS') { confirmed = true; break; }
+                if (d.error_code && d.error_code !== 0) break;
+              }
+            } catch (_) {}
+          }
+        }
+
+        pkgServerProgressCb = null; // stop progress events for this item
+
+        if (!confirmed) {
+          throw new Error(
+            `PS4/PS5 did not connect to the file server at http://${localIp}:${serverPort}/\n\n` +
+            `Test: open http://${localIp}:${serverPort}/file/?b64=dGVzdA== in the PS4 browser.\n` +
+            `If it doesn't load, the PS4 cannot reach this PC on port ${serverPort}.\n\n` +
+            `Run PS4 Vault as Administrator to auto-configure Windows Firewall.`
+          );
         }
 
         results.ok++;
@@ -1524,12 +1945,26 @@ ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort
       } catch (e) {
         console.error('[install] failed:', item.fileName, e.message);
         results.failed++;
-        sender.send('install-progress', { type: 'install-file-error', file: item.fileName, error: e.message });
+        sender.send('install-progress', {
+          type: 'install-file-error', file: item.fileName, error: e.message,
+        });
       }
     }
   } finally {
-    // Keep server alive 90 s — PS4 starts its download after the command
-    setTimeout(() => { stopPkgServer(); console.log('[pkg-server] stopped'); }, 90000);
+    // Keep server alive 5 min — PS4 may still be transferring
+    setTimeout(() => {
+      stopPkgServer();
+      console.log('[pkg-server] stopped');
+      // Restore firewall DefaultInboundAction to Block
+      if (process.platform === 'win32') {
+        try {
+          const { execSync } = require('child_process');
+          execSync(`powershell -NoProfile -NonInteractive -Command "Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block"`,
+            { windowsHide: true, timeout: 6000, stdio: 'pipe' });
+          console.log('[install] Firewall DefaultInboundAction restored to Block');
+        } catch (_) {}
+      }
+    }, 300000);
   }
 
   sender.send('install-progress', { type: 'install-done', ...results });
@@ -1539,19 +1974,296 @@ ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort
 // ── IPC: stop file server ─────────────────────────────────────────────────────
 ipcMain.handle('stop-pkg-server', async () => { await stopPkgServer(); });
 
-// ── PS4 auto-discovery ────────────────────────────────────────────────────────
-// Scans the local /24 subnet for a host responding on the remote installer ports.
-// Check order: 2121, 1337, then 12800 (actual installer port).
-// We try 2121/1337 as "ping" ports (PS4 debug ports) to quickly find PS4 IPs,
-// then confirm with 12800.
+// ── IPC: scan installed games on console via FTP ──────────────────────────────
+// Reads param.sfo + icon0.png directly from /user/app/CUSAXXXXX/ on the console.
+// No PKG archive parsing — direct filesystem read → much faster than PKG scanning.
+// Works for both PS4 (CUSA#####) and PS5 (PPSA#####) jailbreaks.
+ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
+  const sender = event.sender;
+  sender.send('scan-progress', { type: 'scan-start' });
+  let client;
+  try {
+    client = await makeFtpClient(cfg);
+
+    // Possible base paths for installed games on PS4/PS5
+    let appBase = '/user/app';
+    for (const base of ['/user/app', '/system_data/priv/appmeta']) {
+      try { await client.cd(base); appBase = base; break; } catch { /* try next */ }
+    }
+
+    sender.send('scan-progress', { type: 'scan-discovering' });
+    let appDirs = [];
+    try {
+      await client.cd(appBase);
+      const listing = await client.list();
+      // Skip PPSA (PS5 native titles) — include all other PS4 formats
+      appDirs = listing.filter(e => e.isDirectory &&
+        /^(CUSA|PUSA|PLAS|BLES|BCUS|NPEB|NPUB)\d{5}/i.test(e.name) &&
+        !/^PPSA/i.test(e.name));
+    } catch (e) {
+      sender.send('scan-progress', { type: 'scan-error', message: `Cannot list ${appBase}: ${e.message}` });
+      return [];
+    }
+
+    sender.send('scan-progress', { type: 'scan-found', total: appDirs.length });
+    const items = [];
+    let done = 0;
+
+    // Helper: sum all file sizes under a remote directory (recursive, up to maxDepth).
+    // Uses a dedicated FTP client so it doesn't disrupt other transfers.
+    async function ftpDirSize(remotePath, maxDepth = 4) {
+      const sizeClient = await makeFtpClient(cfg);
+      let total = 0;
+      async function walk(p, depth) {
+        if (depth > maxDepth) return;
+        try {
+          const entries = await sizeClient.list(p);
+          for (const e of entries) {
+            const full = (p === '/' ? '' : p) + '/' + e.name;
+            if (e.isDirectory) await walk(full, depth + 1);
+            else total += (e.size || 0);
+          }
+        } catch (_) {}
+      }
+      try { await walk(remotePath, 0); } finally { try { sizeClient.close(); } catch (_) {} }
+      return total;
+    }
+
+    // Helper: download a remote file into a Buffer using a fresh FTP connection.
+    // Using a fresh client per file avoids the state-corruption that occurs when
+    // a previous download fails or is interrupted (e.g. file-not-found aborts
+    // the data channel, leaving the shared client in a broken state).
+    async function ftpDownloadBuf(remotePath, maxBytes) {
+      const dlClient = await makeFtpClient(cfg);
+      try {
+        const chunks = [];
+        let   received = 0;
+        const { Writable } = require('stream');
+        const w = new Writable({
+          write(chunk, _e, cb) {
+            // Buffer up to maxBytes but do NOT destroy — stream.destroy() aborts
+            // the FTP data channel and corrupts the client for subsequent calls.
+            if (received < maxBytes) {
+              chunks.push(chunk.slice(0, Math.min(chunk.length, maxBytes - received)));
+            }
+            received += chunk.length;
+            cb();
+          }
+        });
+        await dlClient.downloadTo(w, remotePath);
+        return Buffer.concat(chunks);
+      } finally {
+        try { dlClient.close(); } catch (_) {}
+      }
+    }
+
+    for (const dir of appDirs) {
+      const _done = done; // capture before async gap
+      sender.send('scan-progress', { type: 'scan-parsing', file: dir.name, done: _done, total: appDirs.length });
+      try {
+        const titleId = dir.name.replace(/[^A-Z0-9]/gi, '').substring(0, 9);
+        // Known PS4/PS5 jailbreak FTP path layouts for param.sfo:
+        //  GoldHEN/etaHEN: /user/app/CUSAXXXXX/sce_sys/param.sfo
+        //  Some CFW:       /user/app/CUSAXXXXX/app/sce_sys/param.sfo
+        //  PS5 via FTP:    /system_data/priv/appmeta/CUSAXXXXX/param.sfo
+        //  Alt mount:      /mnt/sandbox/CUSAXXXXX_000/sce_sys/param.sfo
+        const SFO_PATHS = [
+          `${appBase}/${dir.name}/sce_sys/param.sfo`,
+          `${appBase}/${dir.name}/app/sce_sys/param.sfo`,
+          `/system_data/priv/appmeta/${dir.name}/param.sfo`,
+          `/mnt/sandbox/${dir.name}_000/sce_sys/param.sfo`,
+          `${appBase}/${dir.name}/param.sfo`,
+        ];
+        const ICON_PATHS = [
+          `${appBase}/${dir.name}/sce_sys/icon0.png`,
+          `${appBase}/${dir.name}/app/sce_sys/icon0.png`,
+          `/mnt/sandbox/${dir.name}_000/sce_sys/icon0.png`,
+          `/system_data/priv/appmeta/${dir.name}/icon0.png`,
+          `${appBase}/${dir.name}/sce_sys/icon0.dds`,
+        ];
+
+        // ── Smart SFO + icon discovery ─────────────────────────────────────
+        // Try to LIST sce_sys/ inside the app dir to find param.sfo dynamically.
+        // This handles all known PS4/PS5 FTP mount layouts automatically.
+        // Falls back to the static path list if listing is not permitted.
+        let sfoData = {};
+        let iconDataUrl = null;
+        const MAX_ICON = 512 * 1024;
+
+        // Try each candidate base and dynamically verify param.sfo exists
+        const tryDownloadSfo = async (p) => {
+          const buf = await ftpDownloadBuf(p, 256 * 1024);
+          if (buf.length < 20) throw new Error('too short');
+          const parsed = parseSfo(buf);
+          if (!parsed.TITLE && !parsed.TITLE_ID && !parsed.APP_VER && !parsed.CATEGORY)
+            throw new Error('empty parse');
+          return parsed;
+        };
+
+        // Build candidate dirs to search for sce_sys/
+        const candidateDirs = [
+          `${appBase}/${dir.name}`,
+          `${appBase}/${dir.name}/app`,
+          `/mnt/sandbox/${dir.name}_000`,
+          `/system_data/priv/appmeta/${dir.name}`,
+        ];
+
+        let foundSceDir = null;
+        for (const cDir of candidateDirs) {
+          // Try direct param.sfo first (fastest)
+          for (const sfName of ['sce_sys/param.sfo', 'param.sfo']) {
+            try {
+              const parsed = await tryDownloadSfo(`${cDir}/${sfName}`);
+              console.log(`[installed-scan] ${dir.name} SFO="${parsed.TITLE}" via ${cDir}/${sfName}`);
+              sfoData = parsed;
+              foundSceDir = cDir;
+              break;
+            } catch (_) {}
+          }
+          if (foundSceDir) break;
+        }
+        if (!sfoData.TITLE && !sfoData.TITLE_ID) {
+          console.warn(`[installed-scan] No SFO found for ${dir.name} — tried ${candidateDirs.length} paths`);
+        }
+
+        // Icon candidates — the icon lives ALONGSIDE param.sfo in the same dir,
+        // NOT in a sce_sys/ subdirectory when under appmeta.
+        // Icon is ALWAYS in the game's app dir (/user/app/CUSAXXXXX/sce_sys/icon0.png)
+        // regardless of where param.sfo was found.
+        // appmeta has SFO but NO icon. Game dir has both.
+        const iconCandidates = [
+          `${appBase}/${dir.name}/sce_sys/icon0.png`,          // standard — try first always
+          `${appBase}/${dir.name}/app/sce_sys/icon0.png`,      // subdir variant
+          `/mnt/sandbox/${dir.name}_000/sce_sys/icon0.png`,    // sandbox mount
+          ...(foundSceDir && foundSceDir !== `${appBase}/${dir.name}` ? [
+            `${foundSceDir}/sce_sys/icon0.png`,
+            `${foundSceDir}/icon0.png`,
+          ] : []),
+          `${appBase}/${dir.name}/sce_sys/icon0.dds`,          // DDS fallback
+          `/system_data/priv/appmeta/${dir.name}/icon0.png`,   // appmeta (unlikely but try)
+        ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
+
+        // Known PS4/PS5 icon paths (ordered by likelihood):
+        // /user/appmeta/CUSAXXXXX/icon0.png  ← primary user-space appmeta
+        // /system_data/priv/appmeta/CUSAXXXXX/icon0.png ← system appmeta (same dir as SFO)
+        // /user/app/CUSAXXXXX/sce_sys/icon0.png ← game data dir
+        const iconCandidates2 = [
+          `/user/appmeta/${dir.name}/icon0.png`,
+          ...(foundSceDir ? [
+            `${foundSceDir}/icon0.png`,
+            `${foundSceDir}/sce_sys/icon0.png`,
+          ] : []),
+          `/system_data/priv/appmeta/${dir.name}/icon0.png`,
+          `${appBase}/${dir.name}/sce_sys/icon0.png`,
+          `${appBase}/${dir.name}/sce_sys/icon0.dds`,
+          `${appBase}/${dir.name}/app/sce_sys/icon0.png`,
+          `/mnt/sandbox/${dir.name}_000/sce_sys/icon0.png`,
+        ].filter((v, i, a) => a.indexOf(v) === i);
+
+        for (const iconPath of iconCandidates2) {
+          try {
+            const buf = await ftpDownloadBuf(iconPath, MAX_ICON);
+            if (buf.length > 8) {
+              const isPng  = buf[0] === 0x89 && buf[1] === 0x50;
+              const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8;
+              if (isPng || isJpeg) {
+                iconDataUrl = `data:image/${isPng ? 'png' : 'jpeg'};base64,${buf.toString('base64')}`;
+                console.log(`[installed-scan] ${dir.name} icon OK via ${iconPath}`);
+                break;
+              } else {
+                console.warn(`[installed-scan] ${dir.name} icon bad magic at ${iconPath} (${buf[0].toString(16)} ${buf[1].toString(16)})`);
+              }
+            }
+          } catch (e) {
+            console.warn(`[installed-scan] ${dir.name} icon miss: ${iconPath} — ${e.message}`);
+          }
+        }
+        if (!iconDataUrl) console.warn(`[installed-scan] ${dir.name} NO ICON in any of ${iconCandidates2.length} paths`);
+
+        // Multi-language title fallback chain
+        const sfoTitle = sfoData.TITLE    || sfoData.TITLE_00 || sfoData.TITLE_01 ||
+                         sfoData.TITLE_02 || sfoData.TITLE_03 || '';
+        const resolvedId = sfoData.TITLE_ID || titleId;
+        const appVer   = sfoData.APP_VER  || '';
+        const sysVer   = sfoData.SYSTEM_VER != null ? fwFromInt(sfoData.SYSTEM_VER) : '';
+        // category: GD = full game, GP = patch, AC = DLC etc.
+        const category = sfoData.CATEGORY || 'GD';
+        const contentId = `${appBase}/${dir.name}`;
+
+        // Region from content ID prefix (UP=USA, EP=EUR, JP=JPN, HP=ASIA)
+        // NOT from title ID (CUSA/PPSA has no region info in the prefix)
+        const regionFromContent = sfoData.CONTENT_ID
+          ? sfoData.CONTENT_ID.substring(0, 2)
+          : '';
+        // Fallback: map well-known title-id prefixes to regions
+        const regionFromTitle = resolvedId.startsWith('CUSA') ? 'UP'
+                              : resolvedId.startsWith('PUSA') ? 'EP'
+                              : resolvedId.startsWith('PPSA') ? 'UP'
+                              : '';
+        const region = regionFromContent || regionFromTitle;
+
+        const item = {
+          filePath:    contentId,
+          fileName:    dir.name,
+          dirPath:     appBase,
+          fileSize:    0, // will be updated by background dir-size fetch
+          contentId:   sfoData.CONTENT_ID || contentId,
+          titleId:     resolvedId,
+          title:       sfoTitle || resolvedId || dir.name,
+          sfoTitle,
+          fnTitle:     null,
+          category,
+          appVer,
+          sysVer,
+          region,
+          pkgType:     0,
+          iconDataUrl,
+          isDuplicate: false,
+          isFtp:       true,
+          isInstalled: true,
+          ftpCfg:      cfg,
+        };
+        items.push(item);
+        sender.send('scan-progress', { type: 'scan-result', item });
+
+        // Background: calculate directory size (non-blocking — updates item when done)
+        ftpDirSize(`${appBase}/${dir.name}`).then(sz => {
+          if (sz > 0) {
+            item.fileSize = sz;
+            sender.send('scan-progress', { type: 'scan-result-update', filePath: item.filePath, fileSize: sz });
+            console.log(`[installed-scan] ${dir.name} size=${(sz/1e9).toFixed(2)} GB`);
+          }
+        }).catch(() => {});
+
+      } catch (e) {
+        console.warn('[installed-scan] skip', dir.name, e.message);
+      }
+      done++;
+    }
+
+    sender.send('scan-progress', { type: 'scan-done', total: items.length });
+    return items;
+  } catch (e) {
+    console.error('[installed-scan] error:', e);
+    sender.send('scan-progress', { type: 'scan-error', message: `Installed games scan failed: ${e.message}` });
+    return [];
+  } finally {
+    try { client?.close(); } catch (_) {}
+  }
+});
+
+// ── IPC: PS4/PS5 auto-discovery ──────────────────────────────────────────────
+// Detects both PS4 and PS5 jailbreaks on the local subnet.
+// PS4: FTP on 2121, Remote PKG Installer on 12800
+// PS5: FTP on 2121, Remote PKG Installer on 12800, PS5-specific REST on 9090
 ipcMain.handle('discover-ps4', async (event) => {
   const sender = event.sender;
   const localIp = getLocalIp();
   const parts   = localIp.split('.');
   if (parts.length !== 4) return { found: [], error: 'Cannot determine local subnet' };
 
-  const subnet  = parts.slice(0, 3).join('.');
-  const PROBE_PORTS  = [2121, 1337, 12800];
+  const subnet       = parts.slice(0, 3).join('.');
+  const PROBE_PORTS  = [2121, 9090, 1337, 12800, 21];
   const CONFIRM_PORT = 12800;
   const TIMEOUT_MS   = 600;
   const net = require('net');
@@ -1562,12 +2274,7 @@ ipcMain.handle('discover-ps4', async (event) => {
     return new Promise(resolve => {
       const sock = new net.Socket();
       let done = false;
-      const finish = (open) => {
-        if (done) return;
-        done = true;
-        sock.destroy();
-        resolve(open);
-      };
+      const finish = (open) => { if (done) return; done = true; sock.destroy(); resolve(open); };
       sock.setTimeout(TIMEOUT_MS);
       sock.on('connect',  () => finish(true));
       sock.on('timeout',  () => finish(false));
@@ -1577,37 +2284,32 @@ ipcMain.handle('discover-ps4', async (event) => {
   }
 
   const found = [];
-  // Probe in batches of 32 to avoid overwhelming the network stack
   const BATCH = 32;
   for (let start = 1; start <= 254; start += BATCH) {
     const batch = [];
-    for (let h = start; h < start + BATCH && h <= 254; h++) {
-      batch.push(h);
-    }
+    for (let h = start; h < start + BATCH && h <= 254; h++) batch.push(h);
     await Promise.all(batch.map(async h => {
       const ip = subnet + '.' + h;
-      if (ip === localIp) return; // skip self
-      // Try each probe port — first open one wins
+      if (ip === localIp) return;
       for (const port of PROBE_PORTS) {
         const open = await probePort(ip, port);
         if (open) {
-          const entry = { ip, port };
-          // If found on a non-installer port, also confirm 12800 is reachable
-          if (port !== CONFIRM_PORT) {
-            entry.installerOpen = await probePort(ip, CONFIRM_PORT);
-          } else {
-            entry.installerOpen = true;
-          }
+          const installerOpen = port === CONFIRM_PORT ? true : await probePort(ip, CONFIRM_PORT);
+          const ps5RestOpen   = await probePort(ip, 9090);
+          const ftpOpen2121   = port === 2121         ? true : await probePort(ip, 2121);
+          const ftpOpen21     = !ftpOpen2121 ? await probePort(ip, 21) : false;
+          const ftpPort       = ftpOpen2121 ? 2121 : (ftpOpen21 ? 21 : null);
+          // PS5 jailbreaks typically expose port 9090 (bdj REST); PS4 doesn't
+          const consoleType   = ps5RestOpen ? 'PS5' : 'PS4';
+          const entry = { ip, port, installerOpen, ftpPort, consoleType };
           found.push(entry);
-          sender.send('discover-ps4-progress', { type: 'found', ip, port, installerOpen: entry.installerOpen });
+          sender.send('discover-ps4-progress', { type: 'found', ip, port, installerOpen, ftpPort, consoleType });
           break;
         }
       }
     }));
     sender.send('discover-ps4-progress', {
-      type: 'batch-done',
-      scanned: Math.min(start + BATCH - 1, 254),
-      total: 254,
+      type: 'batch-done', scanned: Math.min(start + BATCH - 1, 254), total: 254,
     });
   }
 

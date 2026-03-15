@@ -1,76 +1,134 @@
+<p align="center">
+  <img src="assets/logo.jpg" width="120" alt="PS4 Vault" style="border-radius:14px"/>
+</p>
 
-# PS4 Vault
+<h1 align="center">PS4 Vault</h1>
 
-**PS4 PKG library manager — scan, organise, rename and transfer `.pkg` files**
+<p align="center">
+  <strong>Scan · Organise · Rename · Transfer · Remote Install</strong><br>
+  PS4 &amp; PS5 PKG file manager for Windows
+</p>
 
-PS4 Vault is a desktop application for Windows (portable `.exe`) that helps you manage your PS4 PKG collection. Scan local drives or FTP sources, see game covers and titles extracted directly from each PKG's embedded `param.sfo` and `icon0.png`, then copy, move, rename or send files directly to your PS4 over the network.
+<p align="center">
+  <a href="https://github.com/YOUR_GITHUB_USERNAME/ps4-vault/releases/latest"><img src="https://img.shields.io/github/v/release/YOUR_GITHUB_USERNAME/ps4-vault?style=flat-square&color=7c3aed&label=Latest" alt="Latest Release"/></a>
+  <a href="https://github.com/YOUR_GITHUB_USERNAME/ps4-vault/releases/latest"><img src="https://img.shields.io/github/downloads/YOUR_GITHUB_USERNAME/ps4-vault/total?style=flat-square&color=2563eb" alt="Downloads"/></a>
+  <a href="https://discord.gg/nj45kDSBEd"><img src="https://img.shields.io/discord/YOUR_DISCORD_ID?style=flat-square&color=5865f2&label=Discord" alt="Discord"/></a>
+</p>
 
 ---
 
 ## Features
 
-- **Scan local drives** — recursively walks any folder or drive letter for `.pkg` files, including mapped network shares
-- **Scan all drives at once** — one click discovers every connected drive and scans them all
-- **FTP scan** — connect to a PS4's built-in FTP server (or any FTP host) and scan PKGs without downloading them
-- **Game covers** — extracts `icon0.png` directly from inside each PKG using the PS4 entry table (`id 0x1200`)
-- **Accurate game titles** — reads `param.sfo` (`id 0x1000`) from inside each PKG; falls back to filename parsing then CUSA ID
-- **Title quality indicator** — subtle visual cue shows whether the name came from SFO (most reliable), filename heuristic, or fallback
-- **Category tabs** — filter by Game / Patch / DLC / App / Theme / Other
-- **Sort & search** — sort by title, size, version, region, firmware; live search across title, CUSA ID and filename
-- **Rename** — single or batch rename with preset format strings (`{TITLE}`, `{TITLE_ID}`, `{VERSION}`, `{REGION}`, `{CATEGORY}`, `{CONTENT_ID}`, `{REQ_FW}`)
-- **Copy / Move** — transfer PKGs with layout options: flat, by Title ID, by Category → ID, rename only, or rename + organise
-- **Remote install** — send PKGs directly to your PS4 via [Remote PKG Installer](https://github.com/flatz/ps4_remote_pkg_installer); PS4 downloads from a local HTTP server started by PS4 Vault
-- **PS4 auto-discovery** — scans your local `/24` subnet for a PS4 with the installer running
-- **Duplicate detection** — flags PKGs sharing the same Content ID
-- **Export CSV** — export your full library with all metadata
-- **Dark / light theme** — click "Made by Nookie" in the top bar to toggle
-- **Portable** — single `.exe`, no installation required
+| Feature | Details |
+|---------|---------|
+| **Fast local scan** | Reads PKG headers at 512 KB/file — extracts game name, cover, CUSA ID, version, region, FW requirement |
+| **FTP scan** | Scan `.pkg` files directly from your PS4/PS5 over FTP |
+| **Scan Installed** | Lists every game installed on your console with covers, sizes, and metadata |
+| **Remote Install** | Sends PKGs directly to PS4/PS5 — supports **RPI (flatz)** and **etaHEN / GoldHEN** |
+| **Real-time progress** | Live speed, ETA, and bytes transferred during install (aggregated across PS5's parallel range connections) |
+| **Copy / Move** | Transfer PKGs with live speed + ETA, rename-on-copy, organize by Title ID or Category |
+| **Rename** | Batch rename with token-based format strings (`{TITLE}`, `{TITLE_ID}`, `{VERSION}`, …) |
+| **Grid + Table views** | Toggle between detailed table and cover-art grid |
+| **Auto-update** | Checks GitHub Releases on startup and prompts to download + install |
+| **Log file** | Full session log at `%AppData%\PS4Vault\ps4vault.log` for bug reporting |
 
 ---
 
 ## Requirements
 
-- Windows 10 / 11 (x64)
-- PS4 on the same local network (for remote install)
-- [Remote PKG Installer](https://github.com/flatz/ps4_remote_pkg_installer) on your PS4 (for remote install)
+- **Windows 10 / 11** (x64)
+- PS4 / PS5 with a jailbreak (GoldHEN, etaHEN, or compatible CFW)
+- Remote PKG Installer running on your console for remote installs
 
 ---
 
-## Getting Started
+## Installation
 
-1. Launch `PS4 Vault.exe`
-2. Enter or browse to a folder containing `.pkg` files in the **Source** field
-3. Click **SCAN** — covers and titles appear as each PKG is parsed
-4. Use the category tabs and search bar to filter your library
-5. Select PKGs and use the action buttons to rename, copy/move or install
+### Installer (recommended — supports auto-update)
+1. Download `PS4.Vault-1.3.0-setup.exe` from [Releases](https://github.com/YOUR_GITHUB_USERNAME/ps4-vault/releases/latest)
+2. Run the installer — no admin required, installs to your user folder
+3. PS4 Vault will notify you when updates are available
 
-### Remote Install
+### Portable
+1. Download `PS4.Vault-1.3.0-portable.exe`
+2. Run directly — no installation needed
+3. Log file saved to `%AppData%\PS4Vault\ps4vault.log`
 
-1. Select one or more PKGs in the library
-2. Click **📡 Install to PS4**
-3. Enter your PS4's IP address (or click **🔍 Find PS4** to scan your network)
-4. Click **🔌 Test Connection** to verify the Remote PKG Installer is running and in focus on your PS4
-5. Click **📡 Send to PS4** — PS4 Vault starts a local HTTP server and instructs your PS4 to download and install each PKG
+> **Note:** The portable version cannot auto-update. Use the installer build for automatic updates.
 
 ---
 
-## PKG Parsing
+## Remote Install Setup
 
-PS4 Vault reads the PKG entry table according to the PS4 PKG specification (confirmed against ShadPS4, PkgToolBox and PS4-PKG-Tool source code):
+1. On your PS4/PS5: launch **Remote PKG Installer** (RPI) or ensure **etaHEN / GoldHEN** is active
+2. Keep the installer app **in focus** on the console
+3. In PS4 Vault: open the install modal, enter your console's IP, click **Test Connection**
+4. Select PKGs and click **Send to PS4 / PS5**
 
-| Entry ID | File |
-|---|---|
-| `0x1000` | `param.sfo` — game title, CUSA ID, version, firmware requirement, category |
-| `0x1200` | `icon0.png` — cover art |
-| `0x1201`–`0x121F` | `icon0` language variants (fallback covers) |
+PS4 Vault auto-detects whether you're running RPI (flatz) or etaHEN/GoldHEN and uses the correct protocol.
 
-Fallback: if the entry table method fails (re-packed or non-standard PKGs), PS4 Vault scans the first 2 MB and the area around `pkg_body_offset` for the `\x00PSF` magic and PNG/JPEG signatures.
-
----
+**Network requirements:** Your PC and PS4/PS5 must be on the same network. PS4 Vault automatically configures Windows Firewall to allow inbound connections on the file server port.
 
 ---
 
-## Licence
+## Scanning Installed Games
 
-MIT © 2026 PS4 Vault  
-Made by Nookie
+1. Click **🎮 PS4/PS5** → enter your console IP and FTP port (usually `2121`)
+2. Click **💾 Scan Installed**
+
+PS4 Vault reads `param.sfo` and `icon0.png` directly from the console filesystem. File sizes are calculated by recursively summing the install directory. Only PS4 titles (`CUSA*`) are shown — PS5 native titles (`PPSA*`) are excluded.
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+A` | Select all visible PKGs |
+| `Ctrl+F` | Focus search |
+| `Enter` | Open install modal for selection |
+| `Delete` | Delete selected PKGs |
+| `Escape` | Clear selection / close context menu |
+| Double-click row | Open install modal |
+| Right-click row | Context menu |
+
+---
+
+## Log File
+
+If something goes wrong, the full session log is at:
+
+```
+C:\Users\<YourName>\AppData\Roaming\PS4Vault\ps4vault.log
+```
+
+Access via **Menu → 📋 View Log File** or **Menu → About PS4 Vault**.
+
+Please include the log when reporting bugs on Discord or GitHub Issues.
+
+---
+
+## Building from Source
+
+```bash
+git clone https://github.com/YOUR_GITHUB_USERNAME/ps4-vault.git
+cd ps4-vault
+npm install
+npm start              # development
+npm run build          # portable .exe
+npm run build:installer # NSIS installer .exe
+```
+
+---
+
+## Credits
+
+Built by **Nookie**  
+Uses [DPI (DirectPackageInstaller)](https://github.com/LightningMods/PS4-Store) protocol for remote install  
+[💬 Discord](https://discord.gg/nj45kDSBEd)
+
+---
+
+## Disclaimer
+
+PS4 Vault is a file management tool. It does not include or distribute any copyrighted game files, exploits, or jailbreak software. Use responsibly and only with games you own.
