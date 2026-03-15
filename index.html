@@ -1,0 +1,1040 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PS4 Vault</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:;">
+  <style>
+    :root {
+      --bg:                #0a0c10;
+      --surface:           #101318;
+      --surface-2:         #171b22;
+      --surface-3:         #1c2129;
+      --muted:             #6b7280;
+      --muted-2:           #9ca3af;
+      --accent:            #00439c;
+      --accent-hover:      #003580;
+      --accent-2:          #4d9fff;
+      --green:             #16a34a;
+      --green-hover:       #15803d;
+      --red:               #dc2626;
+      --red-hover:         #b91c1c;
+      --card-border:       rgba(255,255,255,0.06);
+      --card-border-hover: rgba(255,255,255,0.12);
+      --title:             #f1f5f9;
+      --text:              #cbd5e1;
+      --select-bg:         #171b22;
+      --modal-bg:          #101318;
+      --modal-border:      rgba(255,255,255,0.08);
+      --thumb-size:        60px;
+      --cover-col-width:   80px;
+      --thumb-radius:      8px;
+      --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --radius-sm: 5px;
+      --radius:    7px;
+      --radius-lg: 10px;
+      --row-font-size: 13px;
+    }
+    [data-theme="light"] {
+      --bg:                #f8fafc;
+      --surface:           #ffffff;
+      --surface-2:         #f1f5f9;
+      --surface-3:         #e9eef5;
+      --muted:             #6b7280;
+      --muted-2:           #4b5563;
+      --accent:            #2563eb;
+      --accent-hover:      #1d4ed8;
+      --title:             #0f172a;
+      --text:              #334155;
+      --select-bg:         #f1f5f9;
+      --modal-bg:          #ffffff;
+      --card-border:       rgba(0,0,0,0.07);
+      --card-border-hover: rgba(0,0,0,0.14);
+      --modal-border:      rgba(0,0,0,0.09);
+    }
+
+    html, body {
+      height: 100%; margin: 0;
+      background: var(--bg); color: var(--text);
+      overflow: hidden;
+      font-family: var(--font); font-size: 13px; line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      transition: background .2s, color .2s;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    /* ── Layout shell ── */
+    .container {
+      height: 100vh; display: flex; flex-direction: column;
+      gap: 8px;
+      padding: 10px clamp(6px, 1vw, 18px);
+      width: 100%; overflow: hidden;
+    }
+
+    /* ── Top bar ── */
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+    .brand  { display: flex; gap: 10px; align-items: center; }
+    .logo-wrap {
+      height: 48px; width: auto; max-width: 200px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; border-radius: 8px; background: #0c1a2e;
+      flex: 0 0 auto; margin-right: 6px; padding: 0 4px;
+    }
+    .brand img.brand-logo {
+      height: 48px; width: auto; max-width: 200px;
+      object-fit: contain; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.04);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.45); background: #0c1a2e;
+      display: block;
+    }
+    .brand .meta .app-title  { font-weight: 700; font-size: 14px; color: var(--title); line-height: 1; letter-spacing: -0.02em; }
+    .brand .meta .app-sub    { font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .topbar-right { display: flex; gap: 6px; align-items: center; }
+    .made-by {
+      font-size: 11px; color: var(--muted); padding: 5px 8px;
+      border-radius: 6px; background: transparent; user-select: none; cursor: pointer;
+    }
+    .made-by:hover { color: var(--accent); }
+    .discord-link {
+      font-size: 12px; color: var(--muted); padding: 5px 10px;
+      border-radius: var(--radius); border: 1px solid var(--card-border);
+      background: transparent; cursor: pointer; font-weight: 500;
+      display: inline-flex; gap: 6px; align-items: center;
+      text-decoration: none; transition: color .15s, border-color .15s;
+    }
+    .discord-link:hover { color: var(--title); border-color: var(--card-border-hover); }
+
+    /* ── Controls row ── */
+    .controls-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .ctrl-panel {
+      background: var(--surface); border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg); padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .ctrl-panel-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--muted); flex-shrink: 0;
+    }
+
+    /* ── Input group (input + clear button) ── */
+    .input-group {
+      display: flex; gap: 6px; align-items: center; width: 100%;
+    }
+    .input-group input[type="text"] {
+      flex: 1; min-width: 0;
+    }
+    .btn-clear {
+      flex-shrink: 0; width: 28px; height: 32px;
+      background: transparent; border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm); color: var(--muted);
+      cursor: pointer; font-size: 14px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .12s, color .12s;
+    }
+    .btn-clear:hover { background: rgba(255,255,255,0.06); color: var(--title); }
+
+    /* ── Recent path chips ── */
+    .recent-chips {
+      display: flex; gap: 4px; flex-wrap: wrap; min-height: 0;
+    }
+    .recent-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 99px;
+      background: var(--surface-2); border: 1px solid var(--card-border);
+      color: var(--muted); font-size: 11px; cursor: pointer;
+      max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      transition: border-color .12s, color .12s; flex-shrink: 0;
+    }
+    .recent-chip:hover { border-color: var(--accent); color: var(--title); }
+    .recent-chip .chip-icon { flex-shrink: 0; font-size: 10px; }
+
+    /* ── Scan row inside source panel ── */
+    .scan-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    .scan-display {
+      width: 100%;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .current-scan { font-size: 11px; color: var(--muted); font-weight: 600; }
+    .wiggle-bar {
+      height: 3px; background: rgba(255,255,255,0.04);
+      border-radius: 99px; overflow: hidden; width: 100%; position: relative;
+    }
+    .wiggle-bar .bar-fill {
+      height: 100%; width: 50%;
+      background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
+      animation: indeterminate 2.4s cubic-bezier(0.4,0,0.6,1) infinite;
+    }
+    @keyframes indeterminate { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+
+    /* ── Dest action row ── */
+    .dest-action-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .dest-selects    { display: flex; gap: 6px; flex-wrap: wrap; }
+    .dest-selects select { flex: 1; min-width: 130px; }
+
+    /* ── Inputs & buttons ── */
+    input[type="text"], input[type="password"], input[type="number"], select {
+      padding: 6px 10px; border-radius: var(--radius);
+      border: 1px solid var(--card-border); background: var(--select-bg);
+      color: var(--title); font-size: 13px; font-family: var(--font);
+      outline: none; transition: border-color .15s, box-shadow .15s;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+    select { height: 34px; min-width: 150px; cursor: pointer; }
+
+    .btn {
+      padding: 6px 11px; border-radius: var(--radius);
+      border: 1px solid var(--card-border); background: var(--surface-2);
+      color: var(--muted-2); cursor: pointer; font-size: 12.5px; font-weight: 500;
+      font-family: var(--font); letter-spacing: 0.01em;
+      transition: background .15s, border-color .15s, color .15s; white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--card-border-hover); color: var(--title); background: var(--surface-3); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-scan {
+      padding: 6px 14px; border-radius: var(--radius);
+      border: 1px solid rgba(59,130,246,0.35); cursor: pointer;
+      background: var(--accent); color: #fff;
+      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      letter-spacing: 0.04em; text-transform: uppercase;
+      transition: background .15s, box-shadow .15s; white-space: nowrap;
+    }
+    .btn-scan:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 0 0 3px rgba(59,130,246,0.18); }
+    .btn-scan:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-cancel {
+      padding: 5px 10px; border-radius: var(--radius);
+      border: 1px solid var(--card-border); cursor: pointer;
+      background: transparent; color: var(--muted); font-weight: 500;
+      font-size: 12px; font-family: var(--font);
+      transition: background .15s, color .15s; white-space: nowrap;
+    }
+    .btn-cancel:hover { background: rgba(255,255,255,0.04); color: var(--muted-2); }
+
+    .btn-go {
+      padding: 6px 16px; border-radius: var(--radius);
+      border: 1px solid rgba(34,197,94,0.3); cursor: pointer;
+      background: var(--green); color: #fff;
+      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      letter-spacing: 0.04em; text-transform: uppercase;
+      transition: background .15s, box-shadow .15s; white-space: nowrap;
+    }
+    .btn-go:hover:not(:disabled) { background: var(--green-hover); box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
+    .btn-go:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-danger {
+      padding: 6px 11px; border-radius: var(--radius);
+      border: 1px solid rgba(239,68,68,0.3); cursor: pointer;
+      background: var(--red); color: #fff;
+      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      transition: background .15s, box-shadow .15s; white-space: nowrap;
+    }
+    .btn-danger:hover:not(:disabled) { background: var(--red-hover); box-shadow: 0 0 0 3px rgba(239,68,68,0.15); }
+    .btn-danger:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Content area ── */
+    .content { flex: 1; display: flex; gap: 8px; min-height: 0; align-items: stretch; overflow: hidden; }
+    .results {
+      flex: 1; display: flex; flex-direction: column; min-width: 0;
+      background: var(--surface); border-radius: var(--radius-lg);
+      padding: 10px; border: 1px solid var(--card-border); min-height: 0; overflow: hidden;
+    }
+
+    /* ── Category tabs ── */
+    .cat-tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; align-items: center; flex-shrink: 0; }
+    .cat-tab {
+      padding: 4px 10px; border-radius: 99px;
+      border: 1px solid var(--card-border); background: transparent;
+      color: var(--muted); font-size: 11.5px; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+      transition: background .12s, color .12s, border-color .12s; font-family: var(--font);
+    }
+    .cat-tab:hover { color: var(--title); border-color: var(--card-border-hover); }
+    .cat-tab.active { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+    .cat-count { background: rgba(255,255,255,0.1); color: inherit; font-size: 10px; padding: 1px 5px; border-radius: 99px; font-weight: 700; }
+    .cat-tab.active .cat-count { background: rgba(255,255,255,0.2); }
+
+    /* ── Table ── */
+    .table-wrap {
+      overflow-x: hidden;   /* never show H scrollbar — table is fixed-layout and fits */
+      overflow-y: auto;
+      border-radius: 6px; flex: 1 1 auto; min-height: 0;
+    }
+    table {
+      width: 100%; border-collapse: separate; border-spacing: 0 2px;
+      color: var(--title); table-layout: fixed; font-size: var(--row-font-size);
+      /* table-layout:fixed + width:100% means columns are strictly bounded — no overflow */
+    }
+    thead th {
+      padding: 5px 6px 7px; color: var(--muted); font-size: 10px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+      text-align: left; border-bottom: 1px solid var(--card-border);
+      cursor: pointer; user-select: none; position: sticky; top: 0;
+      background: var(--surface); z-index: 2; overflow: hidden;
+    }
+    thead th:hover { color: var(--muted-2); }
+    thead th.sort-asc::after  { content: ' ▲'; font-size: 9px; }
+    thead th.sort-desc::after { content: ' ▼'; font-size: 9px; }
+    tbody tr { transition: background .08s; cursor: default; }
+    tbody tr:hover td { background: rgba(255,255,255,0.022) !important; }
+    tbody tr:nth-child(even) td { background: rgba(255,255,255,0.01); }
+    tbody tr.row-selected td   { background: rgba(59,130,246,0.07) !important; }
+    tbody td {
+      padding: 5px 6px; vertical-align: middle;
+      overflow: hidden;           /* cells cannot blow past their fixed width */
+      font-size: var(--row-font-size); line-height: 1.4;
+    }
+
+    /* Column widths — all fixed, title gets whatever remains.
+       Total fixed ≈ 518px; title takes 100% − 518px (always ≥ 0 when maximised). */
+    th.check, td.check  { width: 32px; text-align: center; vertical-align: middle; }
+    th.cover, td.cover  { width: var(--cover-col-width); text-align: center; vertical-align: middle; padding: 4px 6px; }
+    th.size,  td.size   { width: 76px; text-align: right; }
+    th.cat,   td.cat    { width: 68px; }
+    th.ver,   td.ver    { width: 56px; }
+    th.reg,   td.reg    { width: 56px; }
+    th.fw,    td.fw     { width: 56px; }
+    th.acts,  td.acts   { width: 100px; text-align: right; white-space: nowrap; }
+    td.mono-col { font-variant-numeric: tabular-nums; color: var(--muted-2); }
+
+    .empty-cell { color: var(--muted); padding: 32px 10px; text-align: center; font-size: 13px; }
+
+    /* ── Cover / thumbnail ── */
+    .icon-wrap {
+      display: flex; align-items: center; justify-content: center;
+      width: var(--thumb-size); height: var(--thumb-size); margin: 0 auto;
+    }
+    .thumb {
+      width: var(--thumb-size); height: var(--thumb-size);
+      object-fit: cover; border-radius: var(--thumb-radius);
+      border: 1px solid var(--card-border); display: block;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+      transition: transform .15s, box-shadow .15s, border-color .15s;
+      cursor: zoom-in;
+    }
+    .thumb:hover {
+      transform: translateY(-2px) scale(1.06);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.6);
+      border-color: var(--card-border-hover);
+    }
+
+    /* ── Title cell ── */
+    .title-cell { min-width: 0; overflow: hidden; }
+    .title-main {
+      font-weight: 600; color: var(--title); line-height: 1.3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      display: flex; align-items: center; gap: 5px; flex-wrap: nowrap;
+      min-width: 0;
+    }
+    .title-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .title-cusa {
+      font-size: 11px; color: var(--muted); margin-top: 2px;
+      font-family: ui-monospace, monospace; font-weight: 500;
+      letter-spacing: 0.03em; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .title-path {
+      font-size: 10px; color: rgba(255,255,255,0.2); margin-top: 2px;
+      font-family: ui-monospace, monospace;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      /* no hardcoded max-width — inherits column constraint from table-layout:fixed */
+    }
+    .title-sub  { font-size: 11px; color: var(--muted); margin-top: 1px; font-weight: 400; }
+    .pkg-filename {
+      font-size: 10.5px; color: var(--muted); margin-top: 2px;
+      font-family: ui-monospace, monospace; cursor: pointer;
+      transition: color .12s;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      /* no hardcoded max-width — inherits column constraint */
+    }
+    .pkg-filename:hover { color: var(--accent-2); text-decoration: underline; }
+
+    /* ── Title name quality indicators ── */
+    /* SFO title = most authoritative: bright white */
+    .title-name.title-from-sfo  { color: var(--title); }
+    /* Filename-guessed title: slightly muted */
+    .title-name.title-from-fn   { color: #c8d8f0; }
+    /* Fallback = CUSA ID or raw filename: muted monospace */
+    .title-name.title-fallback  { color: var(--muted-2); font-family: ui-monospace, monospace; font-size: 12px; }
+
+    /* ── Badges ── */
+    .cat-badge, .reg-badge {
+      display: inline-flex; align-items: center; padding: 2px 7px;
+      border-radius: 4px; font-size: 10.5px; font-weight: 700;
+      letter-spacing: 0.03em; white-space: nowrap;
+    }
+    .cat-game  { background: rgba(59,130,246,0.14);  color: #60a5fa; }
+    .cat-patch { background: rgba(234,179,8,0.14);   color: #fbbf24; }
+    .cat-dlc   { background: rgba(168,85,247,0.14);  color: #c084fc; }
+    .cat-theme { background: rgba(20,184,166,0.14);  color: #2dd4bf; }
+    .cat-app   { background: rgba(156,163,175,0.12); color: var(--muted-2); }
+    .cat-other { background: rgba(255,255,255,0.06); color: var(--muted); }
+    .reg-us    { background: rgba(59,130,246,0.12);  color: #60a5fa; }
+    .reg-eu    { background: rgba(34,197,94,0.12);   color: #4ade80; }
+    .reg-jp    { background: rgba(239,68,68,0.12);   color: #f87171; }
+    .reg-asia  { background: rgba(251,146,60,0.12);  color: #fb923c; }
+    .reg-other { background: rgba(255,255,255,0.06); color: var(--muted); }
+
+    .dup-badge {
+      display: inline-flex; align-items: center; padding: 1px 5px;
+      border-radius: 3px; font-size: 9.5px; font-weight: 700;
+      background: rgba(239,68,68,0.16); color: #f87171;
+      letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0;
+    }
+    .ftp-badge {
+      display: inline-flex; align-items: center; padding: 1px 5px;
+      border-radius: 3px; font-size: 9.5px; font-weight: 700;
+      background: rgba(168,85,247,0.16); color: #c084fc;
+      letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0;
+    }
+
+    /* ── Row action buttons ── */
+    .row-btn {
+      background: transparent; border: none; padding: 3px 5px;
+      cursor: pointer; font-size: 14px; opacity: 0.45;
+      transition: opacity .12s; border-radius: 4px;
+    }
+    .row-btn:hover { opacity: 1; background: rgba(255,255,255,0.06); }
+    .row-btn--danger:hover  { background: rgba(239,68,68,0.1); }
+    .row-btn--install:hover { background: rgba(168,85,247,0.12); }
+    td.acts { white-space: nowrap; }
+
+    /* ── Image preview popup ── */
+    .img-preview {
+      position: fixed; display: none; pointer-events: none;
+      z-index: 12000; max-width: 280px; max-height: 280px;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(10,12,16,0.96); padding: 6px;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.75);
+    }
+    .img-preview img { display: block; max-width: 100%; max-height: 100%; border-radius: 8px; }
+
+    /* ── Modals ── */
+    .modal-backdrop {
+      position: fixed; inset: 0; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+      z-index: 10000; padding: 20px;
+    }
+    .modal {
+      width: 560px; max-width: 95vw; max-height: 90vh;
+      background: var(--modal-bg); color: var(--title);
+      border-radius: var(--radius-lg); padding: 18px;
+      box-shadow: 0 24px 64px rgba(0,0,0,.75), 0 1px 0 rgba(255,255,255,0.05) inset;
+      border: 1px solid var(--modal-border);
+      display: flex; flex-direction: column; gap: 12px;
+      overflow: hidden;
+    }
+    .modal-header {
+      position: relative; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+    }
+    .modal-header h4 { font-size: 15px; font-weight: 600; color: var(--title); margin: 0; }
+    .modal-header .modal-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .modal-body { max-height: 440px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
+    .close-btn {
+      position: absolute; top: 0; right: 0;
+      background: rgba(255,255,255,0.04); border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm); font-size: 16px; color: var(--muted);
+      cursor: pointer; width: 28px; height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .close-btn:hover { background: rgba(255,255,255,0.08); color: var(--title); }
+    .modal.busy .close-btn { display: none !important; }
+
+    /* ── Go modal progress ── */
+    .go-modal { width: 520px; }
+    .go-file-bar-wrap    { background: rgba(255,255,255,0.05); border-radius: 99px; height: 4px; overflow: hidden; }
+    .go-file-bar-fill    { height: 100%; background: var(--accent-2); border-radius: 99px; transition: width .15s; }
+    .go-overall-bar-wrap { background: rgba(255,255,255,0.05); border-radius: 99px; height: 6px; overflow: hidden; }
+    .go-overall-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+
+    /* ── Rename modal ── */
+    .rename-modal { width: 560px; }
+    .rename-preview {
+      margin-top: 6px; padding: 8px 10px; border-radius: var(--radius);
+      background: rgba(255,255,255,0.03); border: 1px solid var(--card-border);
+      font-family: ui-monospace, monospace; font-size: 12px; color: var(--accent-2);
+      word-break: break-all; min-height: 32px;
+    }
+    .rename-tokens { display: flex; gap: 6px; flex-wrap: wrap; }
+    .token-chip {
+      padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+      background: var(--surface-2); border: 1px solid var(--card-border);
+      color: var(--muted-2); cursor: pointer; font-family: ui-monospace, monospace;
+      transition: border-color .1s, color .1s;
+    }
+    .token-chip:hover { color: var(--accent-2); border-color: var(--accent); }
+
+    /* ── FTP modal ── */
+    .ftp-modal { width: 480px; }
+    .ftp-field-group { display: flex; flex-direction: column; gap: 6px; }
+    .ftp-field-group label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .ftp-field-group input { width: 100%; }
+    .ftp-row { display: flex; gap: 8px; }
+    .ftp-row .ftp-field-group { flex: 1; }
+    #ftpStatus {
+      font-size: 12px; padding: 7px 10px; border-radius: var(--radius);
+      background: rgba(255,255,255,0.02); border: 1px solid var(--card-border);
+      color: var(--muted); min-height: 32px; display: flex; align-items: center;
+    }
+
+    /* ── Install button ── */
+    .btn-install {
+      padding: 6px 12px; border-radius: var(--radius);
+      border: 1px solid rgba(168,85,247,0.35); cursor: pointer;
+      background: #7c3aed; color: #fff;
+      font-size: 12.5px; font-weight: 600; font-family: var(--font);
+      letter-spacing: 0.03em; white-space: nowrap;
+      transition: background .15s, box-shadow .15s;
+    }
+    .btn-install:hover:not(:disabled) { background: #6d28d9; box-shadow: 0 0 0 3px rgba(168,85,247,0.2); }
+    .btn-install:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Install modal ── */
+    .install-modal { width: 580px; }
+    .install-settings {
+      display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
+    }
+    .install-settings .form-block { flex: 1; min-width: 120px; }
+    .install-settings .form-block label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .install-settings .form-block input { width: 100%; }
+    .install-local-ip {
+      font-size: 11px; color: var(--muted); padding: 6px 10px;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--card-border);
+      border-radius: var(--radius); font-family: ui-monospace,monospace;
+    }
+    /* install items list */
+    .install-items {
+      display: flex; flex-direction: column; gap: 6px;
+      max-height: 320px; overflow-y: auto; padding-right: 2px;
+    }
+    .install-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: var(--radius);
+      background: rgba(255,255,255,0.02); border: 1px solid var(--card-border);
+      font-size: 12px;
+    }
+    .install-item .ii-icon { font-size: 18px; flex-shrink: 0; width: 26px; text-align: center; }
+    .install-item .ii-info { flex: 1; min-width: 0; }
+    .install-item .ii-name { font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .install-item .ii-status { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: ui-monospace,monospace; }
+    .install-item .ii-bar-wrap { height: 3px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; margin-top: 5px; }
+    .install-item .ii-bar { height: 100%; background: #7c3aed; border-radius: 99px; transition: width .4s ease; width: 0%; }
+    .install-item.ii-done   { border-color: rgba(34,197,94,0.25);  }
+    .install-item.ii-error  { border-color: rgba(239,68,68,0.25);  }
+    .install-item.ii-active { border-color: rgba(168,85,247,0.35); }
+    .install-warn-box {
+      padding: 8px 10px; border-radius: var(--radius);
+      background: rgba(234,179,8,0.07); border: 1px solid rgba(234,179,8,0.2);
+      font-size: 12px; color: #fbbf24;
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px;
+      background: var(--surface-2); color: var(--muted-2);
+      padding: 7px 18px; border-radius: var(--radius);
+      border: 1px solid var(--card-border); font-size: 12.5px; font-weight: 500;
+      display: none; z-index: 20000; box-shadow: 0 4px 18px rgba(0,0,0,.45);
+      white-space: nowrap; pointer-events: none;
+    }
+    .toast--err { color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+    /* ── Scan PS4 button ── */
+    .btn-ps4 {
+      background: rgba(0,90,180,0.18); border-color: rgba(0,120,220,0.4);
+      color: #60b0ff; font-weight: 600;
+    }
+    .btn-ps4:hover:not(:disabled) { background: rgba(0,90,180,0.32); color: #90c8ff; border-color: rgba(0,140,255,0.6); }
+
+    /* ── View toggle ── */
+    .btn-view-toggle { font-size: 12px; padding: 5px 10px; }
+    .btn-view-toggle.active { background: var(--surface-3); border-color: var(--accent); color: var(--accent-2); }
+
+    /* ── Grid / card view ── */
+    .grid-view { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 4px 2px; }
+    .grid-body {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px; padding: 4px;
+    }
+    .grid-card {
+      background: var(--surface-2); border: 1px solid var(--card-border);
+      border-radius: var(--radius-lg); overflow: hidden; cursor: pointer;
+      transition: border-color .15s, transform .15s, box-shadow .15s;
+      display: flex; flex-direction: column; position: relative;
+    }
+    .grid-card:hover { border-color: var(--card-border-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .grid-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,67,156,0.35); }
+    .grid-card .gc-cover {
+      width: 100%; aspect-ratio: 1 / 1; overflow: hidden;
+      background: var(--surface-3);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .grid-card .gc-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .grid-card .gc-cover svg { width: 64px; height: 64px; }
+    .grid-card .gc-body { padding: 8px; flex: 1; min-width: 0; }
+    .grid-card .gc-title {
+      font-size: 12px; font-weight: 600; color: var(--title);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;
+    }
+    .grid-card .gc-sub {
+      font-size: 10px; color: var(--muted); margin-top: 3px;
+      font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .grid-card .gc-badge-row { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+    .grid-card .gc-check {
+      position: absolute; top: 6px; left: 6px;
+      width: 20px; height: 20px; border-radius: 4px;
+      background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.2);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .12s;
+    }
+    .grid-card:hover .gc-check,
+    .grid-card.selected .gc-check { opacity: 1; }
+    .grid-card.selected .gc-check { background: var(--accent); border-color: var(--accent); }
+    .grid-card .gc-check::after { content: '✓'; color: #fff; font-size: 11px; font-weight: 700; }
+
+    /* ── Stats bar ── */
+    .stats-bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 4px 2px; flex-shrink: 0;
+      border-top: 1px solid var(--card-border); margin-top: 4px;
+    }
+    .stat-item { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .stat-sep  { color: rgba(255,255,255,0.12); font-size: 11px; }
+
+    /* ── Context menu ── */
+    .ctx-menu {
+      position: fixed; z-index: 15000;
+      background: var(--surface-2); border: 1px solid var(--card-border-hover);
+      border-radius: var(--radius-lg); padding: 4px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+      min-width: 190px;
+    }
+    .ctx-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 7px 12px; border-radius: var(--radius-sm); font-size: 12.5px;
+      background: none; border: none; color: var(--text); cursor: pointer;
+      font-family: var(--font); text-align: left; transition: background .1s, color .1s;
+      white-space: nowrap;
+    }
+    .ctx-item:hover { background: rgba(255,255,255,0.06); color: var(--title); }
+    .ctx-item--danger { color: #f87171; }
+    .ctx-item--danger:hover { background: rgba(239,68,68,0.1); color: #fca5a5; }
+    .ctx-sep { height: 1px; background: var(--card-border); margin: 4px 0; }
+
+    /* ── Results header ── */
+    .results-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+      flex-wrap: wrap; flex-shrink: 0; min-width: 0; overflow: hidden;
+    }
+    .results-title { font-weight: 800; font-size: 14px; flex-shrink: 0; white-space: nowrap; }
+    .search-input  { width: 180px; min-width: 100px; flex-shrink: 1; }
+    .batch-actions { display: flex; gap: 5px; margin-left: auto; align-items: center; flex-wrap: nowrap; flex-shrink: 0; }
+
+    /* ── Label / form rows ── */
+    .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .form-row   { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .form-block { display: flex; flex-direction: column; gap: 4px; }
+    .form-block label { font-size: 11px; color: var(--muted); font-weight: 600; }
+    #renameFmtRow { align-items: center; gap: 8px; margin-top: 4px; }
+    #renameFmtRow label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    #renameFmtInput { flex: 1; min-width: 180px; font-family: ui-monospace, monospace; font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .controls-row { flex-direction: column; align-items: stretch; }
+      .controls-left { max-width: 100%; }
+      th.cover, td.cover, .thumb { display: none; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+<div class="container">
+
+  <!-- ── Top bar ── -->
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo-wrap" aria-label="PS4 Vault logo" role="img">
+        <img id="brandLogo" class="brand-logo" src="./assets/logo.jpg" alt="PS4 Vault logo"
+             onerror="this.style.display='none';document.getElementById('brandFallback').style.display='flex'">
+        <svg id="brandFallback" style="display:none;height:48px;width:auto;border-radius:8px;" height="48" viewBox="0 0 96 48" xmlns="http://www.w3.org/2000/svg">
+          <rect width="96" height="48" rx="8" fill="#0c1a2e"/>
+          <text x="48" y="21" text-anchor="middle" font-size="11" font-family="Segoe UI,Arial" fill="#93c5fd" font-weight="700">PS4</text>
+          <text x="48" y="35" text-anchor="middle" font-size="9"  font-family="Segoe UI,Arial" fill="#60a5fa" font-weight="600">VAULT</text>
+        </svg>
+      </div>
+      <div class="meta">
+        <div class="app-title">PS4 Vault</div>
+        <div class="app-sub">Scan &amp; organise PS4 .pkg files  v1.1.0</div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div id="madeBy" class="made-by" title="Click to toggle dark / light theme">Made by Nookie</div>
+      <select id="topMenu" class="btn" style="margin-right:4px;">
+        <option value="">Menu</option>
+        <option value="selectAll">Select All</option>
+        <option value="unselectAll">Unselect All</option>
+        <option value="exportCsv">Export CSV</option>
+        <option value="clear">Clear Results</option>
+      </select>
+      <a class="discord-link" href="#" onclick="pkgApi.openExternal('https://discord.gg/nj45kDSBEd');return false;">💬 Discord</a>
+    </div>
+  </div>
+
+  <!-- ── Controls ── -->
+  <div class="controls-row">
+
+    <!-- Source panel -->
+    <div class="ctrl-panel">
+      <div class="ctrl-panel-label">Source</div>
+      <div class="input-group">
+        <input id="sourcePath" type="text" placeholder="Folder containing .pkg files" list="sourceHistory" autocomplete="off" />
+        <datalist id="sourceHistory"></datalist>
+        <button id="btnPickSource" class="btn" title="Browse">📁</button>
+        <button id="btnClearSource" class="btn-clear" title="Clear source">✕</button>
+      </div>
+      <div id="recentSrcChips" class="recent-chips"></div>
+      <div class="scan-row">
+        <button id="btnScan" class="btn-scan">SCAN</button>
+        <button id="btnScanAllDrives" class="btn" title="Scan every connected drive">All Drives</button>
+        <button id="btnFtpScan" class="btn" title="Scan .pkg files over FTP">🌐 FTP Scan</button>
+        <button id="btnScanPs4" class="btn btn-ps4" title="Scan your PS4 via FTP (port 2121)">🎮 Scan PS4</button>
+        <button id="btnCancelScan" class="btn-cancel" style="display:none">✕ Cancel</button>
+      </div>
+      <div id="scanDisplay" class="scan-display" style="display:none">
+        <div id="currentScanLabel" class="current-scan"></div>
+        <div class="wiggle-bar"><div class="bar-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Destination panel -->
+    <div class="ctrl-panel">
+      <div class="ctrl-panel-label">Destination</div>
+      <div class="input-group">
+        <input id="destPath" type="text" placeholder="Destination folder" list="destHistory" autocomplete="off" />
+        <datalist id="destHistory"></datalist>
+        <button id="btnPickDest" class="btn" title="Browse">📁</button>
+        <button id="btnClearDest" class="btn-clear" title="Clear destination">✕</button>
+      </div>
+      <div id="recentDstChips" class="recent-chips"></div>
+      <div class="dest-action-row">
+        <button id="btnGoSelected" class="btn-go" disabled title="Copy / move selected PKGs">GO</button>
+        <div class="dest-selects">
+          <select id="actionSelect">
+            <option value="copy">Copy</option>
+            <option value="move" selected>Move</option>
+          </select>
+          <select id="layoutSelect">
+            <option value="flat" selected>Flat</option>
+            <option value="by-title-id">By Title ID</option>
+            <option value="by-category">By Category → ID</option>
+            <option value="rename">Rename only</option>
+            <option value="rename-organize">Rename + Organise</option>
+          </select>
+        </div>
+      </div>
+      <div id="renameFmtRow" class="input-group" style="display:none">
+        <label class="label" style="white-space:nowrap;font-size:11px;">Format</label>
+        <input id="renameFmtInput" type="text" value="{TITLE_ID} - {TITLE} [v{VERSION}] [{CATEGORY}]"
+               placeholder="{TITLE_ID} - {TITLE} [v{VERSION}] [{CATEGORY}]"
+               style="font-family:ui-monospace,monospace;font-size:12px;" />
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Content ── -->
+  <div class="content">
+    <div class="results" role="main">
+
+      <!-- Results header -->
+      <div class="results-header">
+        <div class="results-title">
+          PKG Library
+          <span id="scanCount" style="font-size:12px;color:var(--muted);margin-left:8px;font-weight:500;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label for="searchInput" class="label">Search:</label>
+          <input id="searchInput" class="search-input" type="text" placeholder="Filter by name, ID, filename…" />
+        </div>
+        <div class="batch-actions">
+          <span id="selectedCount" style="font-size:12px;color:var(--muted);"></span>
+          <button id="btnViewToggle" class="btn btn-view-toggle" title="Toggle grid / table view">⊞ Grid</button>
+          <button id="btnRenameSelected" class="btn" disabled>Rename</button>
+          <button id="btnInstallSelected" class="btn-install" disabled title="Send selected PKGs to PS4 via Remote Package Installer">📡 Install to PS4</button>
+          <button id="btnDeleteSelected" class="btn btn-danger" disabled>Delete</button>
+        </div>
+      </div>
+
+      <!-- Category tabs -->
+      <div class="cat-tabs">
+        <button class="cat-tab active" data-cat="all"   id="catAll">   All   <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Game"  id="catGame">  Game  <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Patch" id="catPatch"> Patch <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="DLC"   id="catDLC">   DLC   <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="App"   id="catApp">   App   <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Theme" id="catTheme"> Theme <span class="cat-count">0</span></button>
+        <button class="cat-tab"        data-cat="Other" id="catOther"> Other <span class="cat-count">0</span></button>
+      </div>
+
+      <!-- Table view -->
+      <div id="tableView" class="table-wrap" role="region" aria-label="PKG library">
+        <table>
+          <thead>
+            <tr>
+              <th class="check"><input id="chkHeader" type="checkbox" title="Select all" /></th>
+              <th class="cover">COVER</th>
+              <th data-sort="title">TITLE</th>
+              <th class="cat"  data-sort="category">TYPE</th>
+              <th class="ver"  data-sort="version">VER</th>
+              <th class="reg"  data-sort="region">REGION</th>
+              <th class="fw"   data-sort="sysVer">REQ FW</th>
+              <th class="size" data-sort="size">SIZE</th>
+              <th class="acts">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr><td colspan="9" class="empty-cell">No scan performed yet. Choose a source folder and click SCAN.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Grid view -->
+      <div id="gridView" class="grid-view" style="display:none" role="region" aria-label="PKG library grid">
+        <div id="gridBody" class="grid-body"></div>
+      </div>
+
+      <!-- Stats bar -->
+      <div id="statsBar" class="stats-bar">
+        <span id="statGames" class="stat-item"></span>
+        <span class="stat-sep">·</span>
+        <span id="statPatches" class="stat-item"></span>
+        <span class="stat-sep">·</span>
+        <span id="statDlc" class="stat-item"></span>
+        <span class="stat-sep">·</span>
+        <span id="statSize" class="stat-item"></span>
+        <span class="stat-sep" id="statFwSep" style="display:none">·</span>
+        <span id="statFw" class="stat-item"></span>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Context menu ── -->
+<div id="ctxMenu" class="ctx-menu" style="display:none">
+  <button class="ctx-item" id="ctxInstall">📡 Install to PS4</button>
+  <button class="ctx-item" id="ctxShowFolder">📂 Show in folder</button>
+  <button class="ctx-item" id="ctxCopyName">📋 Copy filename</button>
+  <button class="ctx-item" id="ctxCopyId">🔖 Copy CUSA ID</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item" id="ctxRename">✏️ Rename</button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item ctx-item--danger" id="ctxDelete">🗑 Delete</button>
+</div>
+
+<!-- ── Image preview popup ── -->
+<div id="imgPreview" class="img-preview"><img src="" alt="preview" /></div>
+
+<!-- ── FTP Scan modal ── -->
+<div id="ftpModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal ftp-modal" role="dialog" aria-modal="true" aria-labelledby="ftpModalTitle">
+    <div class="modal-header">
+      <h4 id="ftpModalTitle">FTP Scan</h4>
+      <div class="modal-sub">Connect to a PS4 or server over FTP to scan for .pkg files</div>
+      <button class="close-btn" id="btnFtpClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="ftp-row">
+        <div class="ftp-field-group" style="flex:2">
+          <label>Host / IP</label>
+          <input id="ftpHost" type="text" placeholder="192.168.1.x" autocomplete="off" list="ftpHostHistory" />
+          <datalist id="ftpHostHistory"></datalist>
+        </div>
+        <div class="ftp-field-group" style="flex:1">
+          <label>Port</label>
+          <input id="ftpPort" type="number" placeholder="21" value="21" min="1" max="65535" />
+        </div>
+      </div>
+      <div class="ftp-row">
+        <div class="ftp-field-group">
+          <label>Username</label>
+          <input id="ftpUser" type="text" placeholder="anonymous" value="anonymous" />
+        </div>
+        <div class="ftp-field-group">
+          <label>Password</label>
+          <input id="ftpPass" type="password" placeholder="(leave blank if none)" />
+        </div>
+      </div>
+      <div class="ftp-field-group">
+        <label>Start path</label>
+        <input id="ftpPath" type="text" placeholder="/" value="/" list="ftpPathHistory" />
+        <datalist id="ftpPathHistory">
+          <option value="/">/</option>
+          <option value="/data/pkg">/data/pkg</option>
+          <option value="/mnt/usb0">/mnt/usb0</option>
+          <option value="/mnt/usb1">/mnt/usb1</option>
+          <option value="/mnt/ext0">/mnt/ext0</option>
+        </datalist>
+      </div>
+      <div id="ftpStatus"></div>
+    </div>
+    <div class="modal-actions">
+      <button id="btnFtpCancel" class="btn">Cancel</button>
+      <button id="btnFtpConnect" class="btn">Test Connection</button>
+      <button id="btnFtpScanStart" class="btn-scan">Scan PKGs</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Rename modal ── -->
+<div id="renameModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal rename-modal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle">
+    <div class="modal-header">
+      <h4 id="renameModalTitle">Rename PKG</h4>
+      <button class="close-btn" onclick="document.getElementById('renameModalBackdrop').style.display='none'">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-block">
+        <label>Preset format</label>
+        <select id="renamePreset" style="width:100%;"></select>
+      </div>
+      <div class="form-block">
+        <label>Name / format string</label>
+        <input id="renameInput" type="text" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;" />
+      </div>
+      <div class="form-block">
+        <label>Insert token</label>
+        <div class="rename-tokens">
+          <button class="token-chip" onclick="insertToken('{TITLE_ID}')">  {TITLE_ID}</button>
+          <button class="token-chip" onclick="insertToken('{TITLE}')">    {TITLE}</button>
+          <button class="token-chip" onclick="insertToken('{VERSION}')">  {VERSION}</button>
+          <button class="token-chip" onclick="insertToken('{CATEGORY}')">{CATEGORY}</button>
+          <button class="token-chip" onclick="insertToken('{REGION}')">  {REGION}</button>
+          <button class="token-chip" onclick="insertToken('{CONTENT_ID}')">{CONTENT_ID}</button>
+          <button class="token-chip" onclick="insertToken('{REQ_FW}')">  {REQ_FW}</button>
+        </div>
+      </div>
+      <div class="form-block">
+        <label>Preview</label>
+        <div id="renamePreview" class="rename-preview">—</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="btnRenameCancel" class="btn">Cancel</button>
+      <button id="btnRenameApply" class="btn-go">Apply Rename</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── GO progress modal ── -->
+<div id="goModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal go-modal busy" id="goModal" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <div id="goModalTitle" style="font-size:15px;font-weight:600;color:var(--title);">Moving PKGs…</div>
+      <button id="goModalClose" class="close-btn" style="display:none">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;padding:4px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <span id="goModalFile" style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;"></span>
+        <span id="goModalProgress" style="font-size:12px;color:var(--muted);white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums;"></span>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;">Current file</div>
+        <div class="go-file-bar-wrap"><div id="goFilebar" class="go-file-bar-fill" style="width:0%"></div></div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;">Overall</div>
+        <div class="go-overall-bar-wrap"><div id="goOverallbar" class="go-overall-bar-fill" style="width:0%"></div></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="goModalCancel" class="btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ── Remote Install modal ── -->
+<div id="installModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal install-modal" role="dialog" aria-modal="true" aria-labelledby="installModalTitle">
+    <div class="modal-header">
+      <h4 id="installModalTitle">📡 Install to PS4</h4>
+      <div class="modal-sub">PS4 will pull each PKG directly from this PC via HTTP</div>
+      <button class="close-btn" id="btnInstallClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" style="gap:12px;">
+
+      <!-- Settings row -->
+      <div class="install-settings">
+        <div class="form-block" style="flex:2">
+          <label>PS4 IP Address</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="installPs4Ip" type="text" placeholder="192.168.1.x" autocomplete="off" spellcheck="false" style="flex:1" />
+            <button id="btnDiscoverPs4" class="btn" title="Scan local network for PS4 (checks ports 2121, 1337, 12800)" style="white-space:nowrap;padding:6px 10px">🔍 Find PS4</button>
+          </div>
+        </div>
+        <div class="form-block" style="flex:1">
+          <label>PS4 Port</label>
+          <input id="installPs4Port" type="number" value="12800" min="1" max="65535" />
+        </div>
+        <div class="form-block" style="flex:1">
+          <label>Server Port</label>
+          <input id="installSrvPort" type="number" value="8090" min="1024" max="65535" />
+        </div>
+      </div>
+
+      <!-- Discover status -->
+      <div id="installDiscoverStatus" style="display:none;font-size:11px;color:var(--muted);font-family:ui-monospace,monospace;padding:4px 0"></div>
+
+      <!-- Local IP info -->
+      <div id="installLocalIpBox" class="install-local-ip" style="display:none">
+        This PC: <span id="installLocalIp">—</span> &nbsp;·&nbsp; PS4 will download from <span id="installBaseUrl">—</span>
+      </div>
+
+      <!-- Warning box (FTP items, etc.) -->
+      <div id="installWarnBox" class="install-warn-box" style="display:none"></div>
+
+      <!-- Per-PKG progress list -->
+      <div id="installItemsList" class="install-items"></div>
+
+      <!-- Summary -->
+      <div id="installSummary" style="font-size:12px;color:var(--muted);display:none;"></div>
+
+    </div>
+    <div class="modal-actions">
+      <button id="btnInstallCancel" class="btn">Close</button>
+      <button id="btnTestPs4Conn" class="btn" title="Verify PS4 installer is reachable before sending">🔌 Test Connection</button>
+      <button id="btnInstallStart" class="btn-install">📡 Send to PS4</button>
+    </div>
+  </div>
+</div>
+
+<script src="renderer.js"></script>
+<script>
+  function insertToken(token) {
+    const inp = document.getElementById('renameInput');
+    const s = inp.selectionStart, e = inp.selectionEnd;
+    inp.value = inp.value.slice(0, s) + token + inp.value.slice(e);
+    inp.setSelectionRange(s + token.length, s + token.length);
+    inp.dispatchEvent(new Event('input'));
+    inp.focus();
+  }
+</script>
+</body>
+</html>

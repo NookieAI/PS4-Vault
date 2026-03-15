@@ -1,0 +1,71 @@
+{
+  "name": "ps4-vault",
+  "version": "1.0.0",
+  "description": "PS4 PKG library manager — scan, organise, rename and transfer .pkg files",
+  "main": "main.js",
+  "author": "PS4 Vault",
+  "license": "MIT",
+  "scripts": {
+    "start":           "electron .",
+    "build":           "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis",
+    "build:all":       "electron-builder --win --mac --linux"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron":         "^29.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId":       "com.ps4vault.app",
+    "productName": "PS4 Vault",
+    "copyright":   "Copyright © 2026 PS4 Vault",
+    "asar":        true,
+
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "assets/**/*"
+    ],
+
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-${version}-portable.exe"
+    },
+
+    "portable": {
+      "requestExecutionLevel": "user",
+      "unpackDirName": "ps4vault"
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon":   "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName":    "${productName}-${version}-setup.exe"
+    },
+
+    "mac": {
+      "target":   "dmg",
+      "icon":     "assets/icon.icns",
+      "category": "public.app-category.utilities"
+    },
+
+    "linux": {
+      "target":   "AppImage",
+      "icon":     "assets/icon.png",
+      "category": "Utility"
+    },
+
+    "directories": {
+      "output":          "dist",
+      "buildResources":  "assets"
+    }
+  }
+}
