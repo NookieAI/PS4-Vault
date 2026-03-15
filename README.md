@@ -44,12 +44,6 @@ PS4 Vault is a desktop application for Windows (portable `.exe`) that helps you 
 4. Use the category tabs and search bar to filter your library
 5. Select PKGs and use the action buttons to rename, copy/move or install
 
-### FTP Scan
-
-1. Click **🌐 FTP Scan**
-2. Enter your PS4's IP, port `2121` (or `21`), and the path to scan (e.g. `/data/pkg`)
-3. Click **Scan PKGs** — PS4 Vault reads the first 512 KB of each remote PKG to extract metadata without a full download
-
 ### Remote Install
 
 1. Select one or more PKGs in the library
@@ -73,16 +67,6 @@ PS4 Vault reads the PKG entry table according to the PS4 PKG specification (conf
 Fallback: if the entry table method fails (re-packed or non-standard PKGs), PS4 Vault scans the first 2 MB and the area around `pkg_body_offset` for the `\x00PSF` magic and PNG/JPEG signatures.
 
 ---
-
-## Building
-
-```bash
-npm install
-npm start          # run in development
-npm run build      # build portable .exe → dist/
-```
-
-Requires Node.js and npm. Electron and electron-builder are dev dependencies — no other runtime dependencies.
 
 ---
 
