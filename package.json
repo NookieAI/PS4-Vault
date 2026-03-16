@@ -26,9 +26,6 @@
     "productName": "PS4 Vault",
     "copyright": "Copyright © 2026 PS4 Vault",
     "asar": true,
-    "asarUnpack": [
-      "assets/**/*"
-    ],
     "files": [
       "main.js",
       "preload.js",
