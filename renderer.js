@@ -1162,11 +1162,38 @@
   $('aboutModalBackdrop').addEventListener('click',e=>{if(e.target===$('aboutModalBackdrop'))closeAboutModal();});
 
   // ── Auto-updater banner ───────────────────────────────────────────────────────
-  (function(){if(!pkgApi.onUpdateStatus)return;const banner=$('updateBanner'),msg=$('updateMsg'),progress=$('updateProgress'),btnDl=$('btnUpdateDownload'),btnInst=$('btnUpdateInstall'),btnDism=$('btnUpdateDismiss');if(!banner)return;
-    pkgApi.onUpdateStatus(d=>{if(d.type==='available'){msg.innerHTML=`<strong>Update available — PS4 Vault v${d.version}</strong>  Ready to download.`;progress.textContent='';btnDl.style.display='inline-block';btnInst.style.display='none';banner.classList.add('show');}else if(d.type==='downloading'){msg.innerHTML='<strong>Downloading update…</strong>';progress.textContent=`${d.percent}%  ${fmtSpeed(d.speed)}`;btnDl.style.display='none';banner.classList.add('show');}else if(d.type==='downloaded'){msg.innerHTML=`<strong>Update ready — v${d.version}</strong>  Restart to install.`;progress.textContent='';btnDl.style.display='none';btnInst.style.display='inline-block';banner.classList.add('show');toast('✅ Update ready — click Restart & Install.');}else if(d.type==='error'){console.warn('[updater]',d.message);}});
-    if(btnDl)btnDl.addEventListener('click',()=>pkgApi.downloadUpdate?.());
-    if(btnInst)btnInst.addEventListener('click',()=>pkgApi.installUpdate?.());
-    if(btnDism)btnDism.addEventListener('click',()=>banner.classList.remove('show'));
+  (function(){
+    if (!pkgApi.onUpdateStatus) return;
+    const banner = $('updateBanner'), msg = $('updateMsg'), progress = $('updateProgress'),
+          btnDl = $('btnUpdateDownload'), btnInst = $('btnUpdateInstall'), btnDism = $('btnUpdateDismiss');
+    if (!banner) return;
+
+    pkgApi.onUpdateStatus(d => {
+      if (d.type === 'available') {
+        // Download starts automatically — just log it
+        console.log('[updater] Downloading v' + d.version + ' in background…');
+      } else if (d.type === 'downloading') {
+        // Show subtle progress in banner but don't force it open
+        msg.innerHTML = `<strong>Downloading update…</strong>`;
+        progress.textContent = `${d.percent}%  ${fmtSpeed(d.speed)}`;
+        btnDl.style.display = 'none';
+        banner.classList.add('show');
+      } else if (d.type === 'downloaded') {
+        // Update is ready — show restart prompt
+        msg.innerHTML = `<strong>Update ready — PS4 Vault v${d.version}</strong>  Restart to install.`;
+        progress.textContent = '';
+        btnDl.style.display = 'none';
+        btnInst.style.display = 'inline-block';
+        banner.classList.add('show');
+        toast('✅ Update downloaded — restart to install.');
+      } else if (d.type === 'error') {
+        console.warn('[updater]', d.message);
+      }
+    });
+
+    if (btnDl)   btnDl.addEventListener('click',   () => pkgApi.downloadUpdate?.());
+    if (btnInst) btnInst.addEventListener('click',  () => pkgApi.installUpdate?.());
+    if (btnDism) btnDism.addEventListener('click',  () => banner.classList.remove('show'));
   })();
 
   // ── Inject runtime CSS ────────────────────────────────────────────────────────

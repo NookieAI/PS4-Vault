@@ -124,59 +124,72 @@ app.on('child-process-gone', (_e, details) => {
 });
 
 // ── Auto-updater (electron-updater + GitHub Releases) ────────────────────────
-// Checks for updates on startup and notifies the renderer.
-// Only active in packaged builds — skipped in dev (npm start).
+// Silent auto-update: checks on startup, downloads in background, installs on quit.
+// Shows a one-time "restart to update" prompt in the renderer when ready.
 function initAutoUpdater() {
   if (!app.isPackaged) {
-    console.log('[updater] Dev mode — auto-update skipped');
+    console.log('[updater] Dev mode — skipped');
+    // Still register IPC handlers so menu "Check for updates" doesn't throw
+    ipcMain.handle('update-check',    () => ({ dev: true }));
+    ipcMain.handle('update-download', () => ({}));
+    ipcMain.handle('update-install',  () => ({}));
     return;
   }
   try {
     const { autoUpdater } = require('electron-updater');
-    autoUpdater.logger            = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
-    autoUpdater.autoDownload      = false; // ask user before downloading
-    autoUpdater.autoInstallOnAppQuit = true;
 
-    autoUpdater.on('checking-for-update', () => {
-      console.log('[updater] Checking for updates…');
-      mainWindow?.webContents.send('update-status', { type: 'checking' });
-    });
-    autoUpdater.on('update-available', info => {
+    // Fully silent — download happens in background, no prompts until ready
+    autoUpdater.autoDownload        = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.logger = {
+      info:  m => console.log('[updater]', m),
+      warn:  m => console.warn('[updater]', m),
+      error: m => console.error('[updater]', m),
+      debug: () => {},
+    };
+
+    function send(payload) {
+      try { mainWindow?.webContents?.send('update-status', payload); } catch (_) {}
+    }
+
+    autoUpdater.on('checking-for-update',  ()     => console.log('[updater] Checking…'));
+    autoUpdater.on('update-not-available', ()     => console.log('[updater] Up to date'));
+    autoUpdater.on('update-available',     info   => {
       console.log('[updater] Update available:', info.version);
-      mainWindow?.webContents.send('update-status', {
-        type: 'available', version: info.version, releaseNotes: info.releaseNotes
-      });
-    });
-    autoUpdater.on('update-not-available', () => {
-      console.log('[updater] Up to date');
-      mainWindow?.webContents.send('update-status', { type: 'not-available' });
+      send({ type: 'available', version: info.version });
     });
     autoUpdater.on('download-progress', p => {
-      mainWindow?.webContents.send('update-status', {
-        type: 'downloading', percent: Math.round(p.percent),
-        speed: p.bytesPerSecond, transferred: p.transferred, total: p.total
-      });
+      console.log(`[updater] Downloading… ${Math.round(p.percent)}%`);
+      send({ type: 'downloading', percent: Math.round(p.percent), speed: p.bytesPerSecond, transferred: p.transferred, total: p.total });
     });
     autoUpdater.on('update-downloaded', info => {
-      console.log('[updater] Update downloaded:', info.version);
-      mainWindow?.webContents.send('update-status', {
-        type: 'downloaded', version: info.version
-      });
+      console.log('[updater] Downloaded:', info.version, '— will install on quit');
+      send({ type: 'downloaded', version: info.version });
     });
     autoUpdater.on('error', e => {
       console.error('[updater] Error:', e.message);
-      mainWindow?.webContents.send('update-status', { type: 'error', message: e.message });
+      send({ type: 'error', message: e.message });
     });
 
-    // Check after window is ready — 3s delay to not block startup
-    app.whenReady().then(() => setTimeout(() => autoUpdater.checkForUpdates(), 3000));
+    // Wait until window is shown before checking — avoids race with webContents
+    mainWindow?.once('show', () => {
+      setTimeout(() => {
+        autoUpdater.checkForUpdates().catch(e =>
+          console.warn('[updater] Check failed:', e.message)
+        );
+      }, 5000);
+    });
 
     // IPC handlers
-    ipcMain.handle('update-check',    () => autoUpdater.checkForUpdates());
-    ipcMain.handle('update-download', () => autoUpdater.downloadUpdate());
-    ipcMain.handle('update-install',  () => autoUpdater.quitAndInstall());
+    ipcMain.handle('update-check',    () => autoUpdater.checkForUpdates().catch(e => ({ error: e.message })));
+    ipcMain.handle('update-download', () => autoUpdater.downloadUpdate().catch(e => ({ error: e.message })));
+    ipcMain.handle('update-install',  () => { autoUpdater.quitAndInstall(false, true); });
+
   } catch (e) {
-    console.warn('[updater] electron-updater not available:', e.message);
+    console.warn('[updater] Not available:', e.message);
+    ipcMain.handle('update-check',    () => ({}));
+    ipcMain.handle('update-download', () => ({}));
+    ipcMain.handle('update-install',  () => ({}));
   }
 }
 initAutoUpdater();
@@ -1511,11 +1524,11 @@ function getLocalIp() {
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
 ipcMain.handle('get-app-path',  () => {
-  // In a packaged asar build, __dirname is virtual (inside the archive) and
-  // can't be used for file:// image loading. app.getAppPath() also returns the
-  // asar path. The actual unpacked resources live next to the asar file.
-  // process.resourcesPath always points to the real resources folder on disk.
-  return app.isPackaged ? process.resourcesPath : __dirname;
+  // In packaged builds, asarUnpack extracts assets to app.asar.unpacked/ next to the asar.
+  // process.resourcesPath points to the resources folder containing both app.asar and app.asar.unpacked.
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked')
+    : __dirname;
 });
 ipcMain.handle('get-local-ip',  () => getLocalIp());
 ipcMain.handle('get-log-path',  () => LOG_FILE);

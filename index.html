@@ -812,31 +812,29 @@
     ::-webkit-scrollbar-corner       { background: transparent; }
     [data-theme="light"] ::-webkit-scrollbar-thumb       { background: rgba(0,0,0,0.15); }
     [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
-
-  
-    .path-panel.drag-over { outline: 2px dashed var(--accent); outline-offset: 3px; background: rgba(124,58,237,0.05); border-radius: var(--radius); }
+  /* ── Splash screen ── */
+  #splashTitle { font-size:26px;font-weight:800;color:var(--title);letter-spacing:-.03em;margin-bottom:6px; }
+  #splashSub   { font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px; }
+  #splashBarWrap {
+    width:220px;height:3px;background:rgba(255,255,255,0.07);border-radius:99px;
+    position:relative;overflow:hidden;margin-bottom:16px;
+  }
+  #splashBar {
+    position:absolute;top:0;left:-60%;width:60%;height:100%;border-radius:99px;
+    background:linear-gradient(90deg,transparent,#00439c,#4d9fff,transparent);
+    will-change:transform;
+    animation:splash-shimmer 1.2s linear infinite;
+  }
+  @keyframes splash-shimmer {
+    0%   { transform:translateX(0); }
+    100% { transform:translateX(calc(220px / 0.6 * 2.67)); }
+  }
+  #startupMsg { font-size:11.5px;color:var(--muted);min-height:16px;text-align:center; }
+  .path-panel.drag-over { outline: 2px dashed var(--accent); outline-offset: 3px; background: rgba(124,58,237,0.05); border-radius: var(--radius); }
 </style>
 </head>
 <body data-theme="dark">
 <div id="startupOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0;transition:opacity .35s;">
-  <style>
-    #splashTitle { font-size:26px;font-weight:800;color:var(--title);letter-spacing:-.03em;margin-bottom:6px; }
-    #splashSub   { font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px; }
-    #splashBarWrap {
-      width:220px;height:3px;background:rgba(255,255,255,0.07);border-radius:99px;position:relative;margin-bottom:16px;
-    }
-    #splashBar {
-      position:absolute;left:0;top:0;height:100%;width:100%;border-radius:99px;
-      background:linear-gradient(90deg,transparent 0%,#00439c 40%,#4d9fff 60%,transparent 100%);
-      background-size:200% 100%;
-      animation:splash-shimmer 1.4s ease-in-out infinite;
-    }
-    @keyframes splash-shimmer {
-      0%   { background-position:200% 0; }
-      100% { background-position:-200% 0; }
-    }
-    #startupMsg { font-size:11.5px;color:var(--muted);min-height:16px;text-align:center; }
-  </style>
   <div id="splashTitle">PS4 Vault</div>
   <div id="splashSub">Game Library Manager</div>
   <div id="splashBarWrap"><div id="splashBar"></div></div>
