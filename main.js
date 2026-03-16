@@ -29,7 +29,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.3';
+const VERSION        = '1.0.4';
 // initLog() called after app.whenReady — see below
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -108,7 +108,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  mainWindow.webContents.on('did-finish-load', () => console.log('[main] PS4 Vault v' + VERSION));
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[main] PS4 Vault v' + VERSION);
+    mainWindow.webContents.send('app-version', VERSION);
+  });
 }
 
 app.whenReady().then(() => { initLog(); createWindow(); });
