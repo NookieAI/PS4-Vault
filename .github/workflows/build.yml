@@ -4,24 +4,36 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.3)'
+        required: true
 
 permissions:
   contents: write
 
 jobs:
-  # Step 1: Create the GitHub release first so both build jobs
-  # have a release to upload to — eliminates the race condition.
   create-release:
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create.outputs.upload_url }}
+      tag: ${{ steps.get-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Get tag
+        id: get-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create release
-        id: create
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.get-tag.outputs.tag }}
           draft: false
           generate_release_notes: true
 
@@ -30,6 +42,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -44,6 +58,7 @@ jobs:
       - name: Upload Mac DMG
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
           files: dist/**/*.dmg
 
   build-linux:
@@ -51,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
 
       - uses: actions/setup-node@v4
         with:
@@ -68,4 +85,5 @@ jobs:
       - name: Upload Linux AppImage
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
           files: dist/**/*.AppImage
