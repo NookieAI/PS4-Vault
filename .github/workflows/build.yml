@@ -76,16 +76,8 @@ jobs:
         run: |
           mkdir -p assets
           if [ ! -f assets/icon.png ]; then
-            # Create a minimal 256x256 PNG if none exists
-            python3 -c "
-import struct, zlib
-def png(w,h):
-    def chunk(t,d): return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
-    ihdr=struct.pack('>IIBBBBB',w,h,8,2,0,0,0)
-    raw=b''.join(b'\x00'+bytes([30,30,30]*w) for _ in range(h))
-    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',ihdr)+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
-open('assets/icon.png','wb').write(png(256,256))
-"
+            # Write a minimal valid 256x256 grey PNG using a base64-encoded blob
+            echo 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAABmJLR0QA/wD/AP+gvaeTAAAADklEQVQI12NgYGBgAAAABAABJjABGAAAAAAASUVORK5CYII=' | base64 -d > assets/icon.png
           fi
 
       - name: Build Linux AppImage
