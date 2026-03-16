@@ -20,16 +20,14 @@ jobs:
 
       - run: npm install
 
-      - name: Build Mac (no publish)
+      - name: Build Mac
         run: npx electron-builder --mac --publish never
 
-      - name: Upload Mac artifacts to release
+      - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*.dmg
-            dist/*.zip
-            dist/latest-mac.yml
+          draft: false
+          files: dist/*.dmg
 
   build-linux:
     runs-on: ubuntu-latest
@@ -42,13 +40,11 @@ jobs:
 
       - run: npm install
 
-      - name: Build Linux (no publish)
+      - name: Build Linux
         run: npx electron-builder --linux --publish never
 
-      - name: Upload Linux artifacts to release
+      - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/latest-linux.yml
+          draft: false
+          files: dist/*.AppImage
