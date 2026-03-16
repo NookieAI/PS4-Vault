@@ -1677,20 +1677,20 @@ ipcMain.handle('open-log',      () => shell.openPath(LOG_FILE).catch(() => shell
 ipcMain.handle('open-log-folder', () => shell.openPath(LOG_DIR).catch(() => {}));
 
 // ── Library persistence ───────────────────────────────────────────────────────
-const LIBRARY_FILE = path.join(LOG_DIR, 'library.json');
+const LIBRARY_FILE = () => path.join(LOG_DIR, 'library.json');
 ipcMain.handle('save-library', async (_e, items) => {
   try {
     // Strip iconDataUrl blobs before saving (they're regenerated on scan)
     // Keep iconDataUrl so covers display after library reload.
     // Strip only ftpCfg (contains credentials) and _b64key (runtime-only).
     const slim = items.map(i => { const { ftpCfg, _b64key, ...rest } = i; return rest; });
-    await fs.promises.writeFile(LIBRARY_FILE, JSON.stringify(slim));
+    await fs.promises.writeFile(LIBRARY_FILE(), JSON.stringify(slim));
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 ipcMain.handle('load-library', async () => {
   try {
-    const raw  = await fs.promises.readFile(LIBRARY_FILE, 'utf8');
+    const raw  = await fs.promises.readFile(LIBRARY_FILE(), 'utf8');
     const items = JSON.parse(raw);
     // Normalise items: fill any fields that may be missing from older saved libraries.
     // This makes PS4 Vault resilient to schema changes between versions.
@@ -1774,19 +1774,19 @@ ipcMain.handle('refetch-covers', async (event, filePaths) => {
   return { ok: true, total: filePaths.length };
 });
 ipcMain.handle('clear-library', async () => {
-  try { await fs.promises.unlink(LIBRARY_FILE); } catch {}
+  try { await fs.promises.unlink(LIBRARY_FILE()); } catch {}
   return { ok: true };
 });
 
 // ── Settings get/set ──────────────────────────────────────────────────────────
-const SETTINGS_FILE = path.join(LOG_DIR, 'settings.json');
+const SETTINGS_FILE = () => path.join(LOG_DIR, 'settings.json');
 ipcMain.handle('get-setting', async (_e, key) => {
-  try { const s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE,'utf8')); return s[key]; } catch { return null; }
+  try { const s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE(),'utf8')); return s[key]; } catch { return null; }
 });
 ipcMain.handle('set-setting', async (_e, key, val) => {
-  let s = {}; try { s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE,'utf8')); } catch {}
+  let s = {}; try { s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE(),'utf8')); } catch {}
   s[key] = val;
-  await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(s));
+  await fs.promises.writeFile(SETTINGS_FILE(), JSON.stringify(s));
   // Apply certain settings immediately at runtime
   if (key === 'ftpPool' && typeof val === 'number' && val >= 1 && val <= 8) {
     FTP_POOL_SIZE = val;
