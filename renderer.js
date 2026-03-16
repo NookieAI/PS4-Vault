@@ -45,16 +45,16 @@
   }
 
   // ── Logo ──────────────────────────────────────────────────────────────────────
+  // Main process reads the file and returns a base64 data URL — works in both
+  // dev and packaged builds with no file:// path issues.
   (async () => {
-    for (let i = 0; i < 5; i++) {
-      try {
-        const p = await pkgApi.getAppPath();
-        const src = 'file:///' + p.replace(/\\/g, '/') + '/assets/logo.jpg';
+    try {
+      const dataUrl = await pkgApi.getLogoDataUrl();
+      if (dataUrl) {
         const logo = $('brandLogo');
-        if (logo && p) logo.src = src;
-        break;
-      } catch (_) { await new Promise(r => setTimeout(r, 500)); }
-    }
+        if (logo) logo.src = dataUrl;
+      }
+    } catch (_) {}
   })();
 
   // ── Theme ─────────────────────────────────────────────────────────────────────
