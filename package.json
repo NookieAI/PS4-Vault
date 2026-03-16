@@ -82,8 +82,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "YOUR_GITHUB_USERNAME",
-      "repo": "ps4-vault",
+      "owner": "NookieAI",
+      "repo": "PS4-Vault",
       "releaseType": "release"
     },
     "extraMetadata": {
