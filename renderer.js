@@ -45,17 +45,8 @@
   }
 
   // ── Logo ──────────────────────────────────────────────────────────────────────
-  // Main process reads the file and returns a base64 data URL — works in both
-  // dev and packaged builds with no file:// path issues.
-  (async () => {
-    try {
-      const dataUrl = await pkgApi.getLogoDataUrl();
-      if (dataUrl) {
-        const logo = $('brandLogo');
-        if (logo) logo.src = dataUrl;
-      }
-    } catch (_) {}
-  })();
+  // Logo is set via static src="./assets/logo.jpg" in index.html.
+  // Electron resolves relative paths correctly in both dev and packaged builds.
 
   // ── Theme ─────────────────────────────────────────────────────────────────────
   function applyTheme(t) { document.body.dataset.theme = t; saveSetting('theme', t); }
