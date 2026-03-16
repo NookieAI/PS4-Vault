@@ -7,10 +7,12 @@ const crypto = require('crypto');
 
 // ── File logger ───────────────────────────────────────────────────────────────
 // Log file: %APPDATA%\PS4Vault\ps4vault.log  (rotates at 500 KB)
-const LOG_DIR  = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault');
-const LOG_FILE = path.join(LOG_DIR, 'ps4vault.log');
+let LOG_DIR  = '';
+let LOG_FILE = '';
 let   _logStream = null;
 function initLog() {
+  LOG_DIR  = app.getPath('userData');
+  LOG_FILE = path.join(LOG_DIR, 'ps4vault.log');
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
     try { const s = fs.statSync(LOG_FILE); if (s.size > 500*1024) fs.renameSync(LOG_FILE, LOG_FILE+'.bak'); } catch (_) {}
@@ -28,7 +30,7 @@ console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`$
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
 const VERSION        = '1.0.3';
-initLog();
+// initLog() called after app.whenReady — see below
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
 const ICON_MAX_BYTES = 800 * 1024;
@@ -47,13 +49,15 @@ process.on('unhandledRejection', e => console.error('[main] Unhandled rejection:
 let mainWindow;
 
 // ── Window state persistence ──────────────────────────────────────────────────
-const WIN_STATE_FILE = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault', 'window-state.json');
+// WIN_STATE_FILE resolved lazily inside loadWinState/saveWinState
 function loadWinState() {
+  const WIN_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
   try { return JSON.parse(fs.readFileSync(WIN_STATE_FILE, 'utf8')); } catch { return null; }
 }
 function saveWinState(win) {
   if (!win || win.isMinimized()) return;
   const s = { maximized: win.isMaximized(), ...( !win.isMaximized() ? win.getBounds() : {} ) };
+  const WIN_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
   try { fs.writeFileSync(WIN_STATE_FILE, JSON.stringify(s)); } catch {}
 }
 
@@ -104,11 +108,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
-  mainWindow.webContents.on('did-finish-load', () =>
-    console.log(`[main] PS4 Vault v${VERSION}`));
+  mainWindow.webContents.on('did-finish-load', () => console.log('[main] PS4 Vault v' + VERSION));
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { initLog(); createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 // Renderer crash → recreate window rather than leaving a white screen
@@ -1362,7 +1365,7 @@ function categoryDisplay(cat) {
   if (['gd','gde','gda','gdc','hg'].includes(c)) return 'Game';
   if (c === 'gp')    return 'Patch';
   if (c === 'ac')    return 'DLC';
-  if (c === 'theme' || c === 'gdc') return 'Theme';
+  if (c === 'theme') return 'Theme';
   if (c === 'app' || c === 'ap') return 'App';
   return c ? c.toUpperCase() : 'Other';
 }
@@ -1646,22 +1649,19 @@ function getLocalIp() {
 }
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
-ipcMain.handle('get-app-path', () => {
-  if (!app.isPackaged) return __dirname;
-  // asarUnpack extracts assets to app.asar.unpacked/ inside resources/
-  return path.join(process.resourcesPath, 'app.asar.unpacked');
-});
+ipcMain.handle('get-app-path', () => app.isPackaged ? process.resourcesPath : __dirname);
 
-// Send the logo as a base64 data URL directly — eliminates all path issues
+// Read logo from extraResources (resources/assets/) in packaged build, or project assets/ in dev.
+// Returns a base64 data URL so the renderer never has to construct a file path.
 ipcMain.handle('get-logo-data-url', () => {
   try {
     const logoPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'logo.jpg')
+      ? path.join(process.resourcesPath, 'assets', 'logo.jpg')
       : path.join(__dirname, 'assets', 'logo.jpg');
     const data = fs.readFileSync(logoPath);
     return 'data:image/jpeg;base64,' + data.toString('base64');
   } catch (e) {
-    console.warn('[logo] Could not load logo:', e.message);
+    console.warn('[logo] failed:', e.message);
     return null;
   }
 });
