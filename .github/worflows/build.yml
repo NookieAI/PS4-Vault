@@ -1,0 +1,99 @@
+name: Build PS4 Vault
+
+on:
+  push:
+    tags:
+      - 'v*'          # triggers on version tags e.g. v1.0.0
+  workflow_dispatch:  # allows manual trigger from GitHub Actions UI
+
+permissions:
+  contents: write   # needed to create GitHub Releases and upload assets
+
+jobs:
+
+  # ── macOS — produces .dmg ─────────────────────────────────────────────────
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS DMG
+        run: npm run build:all -- --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # ── Linux — produces .AppImage ────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y rpm fakeroot
+
+      - name: Build Linux AppImage
+        run: npm run build:all -- --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  # ── Release — attaches all artifacts to the GitHub Release ───────────────
+  release:
+    needs: [build-mac, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist
+
+      - name: Download linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
