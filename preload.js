@@ -14,17 +14,31 @@ contextBridge.exposeInMainWorld('pkgApi', {
   getLogPath:          ()                               => ipcRenderer.invoke('get-log-path'),
   openLog:             ()                               => ipcRenderer.invoke('open-log'),
   openLogFolder:       ()                               => ipcRenderer.invoke('open-log-folder'),
+  // ── Library persistence ────────────────────────────────────────────────────
+  saveLibrary:         (items)                          => ipcRenderer.invoke('save-library', items),
+  refetchCovers:       (filePaths)                      => ipcRenderer.invoke('refetch-covers', filePaths),
+  onCoverReady:        (cb)                             => ipcRenderer.on('cover-ready', (_e, d) => cb(d)),
+  offCoverReady:       ()                               => ipcRenderer.removeAllListeners('cover-ready'),
+  loadLibrary:         ()                               => ipcRenderer.invoke('load-library'),
+  clearLibrary:        ()                               => ipcRenderer.invoke('clear-library'),
+  // ── Settings ───────────────────────────────────────────────────────────────
+  getSetting:          (key)                            => ipcRenderer.invoke('get-setting', key),
+  setSetting:          (key, val)                       => ipcRenderer.invoke('set-setting', key, val),
+  // ── PKG integrity ──────────────────────────────────────────────────────────
+  verifyPkg:           (filePath)                       => ipcRenderer.invoke('verify-pkg', filePath),
+  // ── Speed test ─────────────────────────────────────────────────────────────
+  speedTestPs4:        (ip, port, srvPort)              => ipcRenderer.invoke('speed-test-ps4', ip, port, srvPort),
   // ── Auto-updater ──────────────────────────────────────────────────────────
   checkForUpdates:     ()                               => ipcRenderer.invoke('update-check'),
   downloadUpdate:      ()                               => ipcRenderer.invoke('update-download'),
   installUpdate:       ()                               => ipcRenderer.invoke('update-install'),
   onUpdateStatus:      (cb)                             => ipcRenderer.on('update-status', (_e, d) => cb(d)),
   offUpdateStatus:     ()                               => ipcRenderer.removeAllListeners('update-status'),
-  discoverPs4:         ()                               => ipcRenderer.invoke('discover-ps4'),
+  discoverPs4:         (subnet)                         => ipcRenderer.invoke('discover-ps4', subnet),
   testPs4Conn:         (ip, port)                        => ipcRenderer.invoke('test-ps4-conn', ip, port),
 
   // ── Local scan ──────────────────────────────────────────────────────────────
-  scanPkgs:            (sourceDir)                      => ipcRenderer.invoke('scan-pkgs', sourceDir),
+  scanPkgs:            (sourceDir, scanDepth)           => ipcRenderer.invoke('scan-pkgs', sourceDir, scanDepth),
   cancelOperation:     ()                               => ipcRenderer.invoke('cancel-operation'),
 
   // ── FTP ─────────────────────────────────────────────────────────────────────
@@ -36,10 +50,10 @@ contextBridge.exposeInMainWorld('pkgApi', {
   deletePkgs:          (items)                          => ipcRenderer.invoke('delete-pkgs', items),
   renamePkg:           (item, newName)                  => ipcRenderer.invoke('rename-pkg', item, newName),
   checkPkgConflicts:   (items, dest, layout, fmt)       => ipcRenderer.invoke('check-pkg-conflicts', items, dest, layout, fmt),
-  goPkgs:              (items, dest, act, lay, fmt, ftpDest) => ipcRenderer.invoke('go-pkgs', items, dest, act, lay, fmt, ftpDest),
+  goPkgs:              (items, dest, act, lay, fmt, ftpDest, conflictModes) => ipcRenderer.invoke('go-pkgs', items, dest, act, lay, fmt, ftpDest, conflictModes),
 
   // ── Remote install ───────────────────────────────────────────────────────────
-  remoteInstall:       (items, ps4Ip, ps4Port, srvPort) => ipcRenderer.invoke('remote-install', items, ps4Ip, ps4Port, srvPort),
+  remoteInstall:       (items, ps4Ip, ps4Port, srvPort, installDelay) => ipcRenderer.invoke('remote-install', items, ps4Ip, ps4Port, srvPort, installDelay),
   stopPkgServer:       ()                               => ipcRenderer.invoke('stop-pkg-server'),
 
   // ── Progress event streams ───────────────────────────────────────────────────
