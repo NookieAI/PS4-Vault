@@ -27,7 +27,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.2';
+const VERSION        = '1.0.3';
 initLog();
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -1510,7 +1510,13 @@ function getLocalIp() {
 }
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
-ipcMain.handle('get-app-path',  () => __dirname);
+ipcMain.handle('get-app-path',  () => {
+  // In a packaged asar build, __dirname is virtual (inside the archive) and
+  // can't be used for file:// image loading. app.getAppPath() also returns the
+  // asar path. The actual unpacked resources live next to the asar file.
+  // process.resourcesPath always points to the real resources folder on disk.
+  return app.isPackaged ? process.resourcesPath : __dirname;
+});
 ipcMain.handle('get-local-ip',  () => getLocalIp());
 ipcMain.handle('get-log-path',  () => LOG_FILE);
 ipcMain.handle('open-log',      () => shell.openPath(LOG_FILE).catch(() => shell.showItemInFolder(LOG_FILE)));

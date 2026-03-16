@@ -1176,6 +1176,9 @@
 
   // ── Init: load saved library + settings, then hide overlay ──────── Feature 19
   (async()=>{
+    // Small delay so the splash screen paints and the progress bar animation
+    // starts before the main thread gets busy loading the library.
+    await new Promise(r => setTimeout(r, 120));
     try {
       setStartupMsg('Loading saved library…');
       const r = await pkgApi.loadLibrary?.();
