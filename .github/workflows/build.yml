@@ -2,9 +2,12 @@ name: Build PS4 Vault
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
-      - 'v*'          # triggers on version tags e.g. v1.0.0
-  workflow_dispatch:  # allows manual trigger from GitHub Actions UI
+      - 'v*'
+  workflow_dispatch:  # manual trigger from the Actions tab in GitHub
 
 permissions:
   contents: write   # needed to create GitHub Releases and upload assets
@@ -26,8 +29,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Ensure icon exists
+        run: |
+          mkdir -p assets
+          if [ ! -f assets/icon.icns ] || [ ! -f assets/icon.ico ]; then
+            # Generate a minimal valid 256x256 icon from any PNG in assets, or create blank
+            if [ -f assets/icon.png ]; then
+              sips -s format icns assets/icon.png --out assets/icon.icns 2>/dev/null || true
+            fi
+            # For .ico: electron-builder only needs it for Windows builds, safe to skip on mac
+          fi
+
       - name: Build macOS DMG
-        run: npm run build:all -- --mac
+        run: npx electron-builder --mac --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,8 +72,24 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y rpm fakeroot
 
+      - name: Ensure icon exists
+        run: |
+          mkdir -p assets
+          if [ ! -f assets/icon.png ]; then
+            # Create a minimal 256x256 PNG if none exists
+            python3 -c "
+import struct, zlib
+def png(w,h):
+    def chunk(t,d): return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+    ihdr=struct.pack('>IIBBBBB',w,h,8,2,0,0,0)
+    raw=b''.join(b'\x00'+bytes([30,30,30]*w) for _ in range(h))
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',ihdr)+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
+open('assets/icon.png','wb').write(png(256,256))
+"
+          fi
+
       - name: Build Linux AppImage
-        run: npm run build:all -- --linux
+        run: npx electron-builder --linux --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
