@@ -27,7 +27,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.1';
+const VERSION        = '1.0.2';
 initLog();
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
