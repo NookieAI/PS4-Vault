@@ -66,13 +66,11 @@
     },
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.utilities",
-      "icon": "assets/icon.icns"
+      "category": "public.app-category.utilities"
     },
     "linux": {
       "target": "AppImage",
-      "category": "Utility",
-      "icon": "assets/icon.png"
+      "category": "Utility"
     },
     "directories": {
       "output": "dist"
