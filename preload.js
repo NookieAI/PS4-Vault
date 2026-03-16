@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('pkgApi', {
   copyToClipboard:     (text)                           => ipcRenderer.invoke('clipboard-write', text),
   getAllDrives:         ()                               => ipcRenderer.invoke('get-all-drives'),
   getAppPath:          ()                               => ipcRenderer.invoke('get-app-path'),
+  getLogoDataUrl:      ()                               => ipcRenderer.invoke('get-logo-data-url'),
 
   // ── Network helpers ─────────────────────────────────────────────────────────
   getLocalIp:          ()                               => ipcRenderer.invoke('get-local-ip'),

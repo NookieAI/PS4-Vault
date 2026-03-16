@@ -1646,12 +1646,24 @@ function getLocalIp() {
 }
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
-ipcMain.handle('get-app-path',  () => {
-  // In packaged builds, asarUnpack extracts assets to app.asar.unpacked/ next to the asar.
-  // process.resourcesPath points to the resources folder containing both app.asar and app.asar.unpacked.
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked')
-    : __dirname;
+ipcMain.handle('get-app-path', () => {
+  if (!app.isPackaged) return __dirname;
+  // asarUnpack extracts assets to app.asar.unpacked/ inside resources/
+  return path.join(process.resourcesPath, 'app.asar.unpacked');
+});
+
+// Send the logo as a base64 data URL directly — eliminates all path issues
+ipcMain.handle('get-logo-data-url', () => {
+  try {
+    const logoPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'logo.jpg')
+      : path.join(__dirname, 'assets', 'logo.jpg');
+    const data = fs.readFileSync(logoPath);
+    return 'data:image/jpeg;base64,' + data.toString('base64');
+  } catch (e) {
+    console.warn('[logo] Could not load logo:', e.message);
+    return null;
+  }
 });
 ipcMain.handle('get-local-ip',  () => getLocalIp());
 ipcMain.handle('get-log-path',  () => LOG_FILE);
