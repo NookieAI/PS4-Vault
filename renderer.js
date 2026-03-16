@@ -50,7 +50,7 @@
       try {
         const p = await pkgApi.getAppPath();
         const logo = $('brandLogo');
-        if (logo && p) logo.src = 'file:///' + p.replace(/\\/g, '/') + '/logo.jpg';
+        if (logo && p) logo.src = 'file:///' + p.replace(/\\/g, '/') + '/assets/logo.jpg';
         break;
       } catch (_) { await new Promise(r => setTimeout(r, 500)); }
     }
