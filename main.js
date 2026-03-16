@@ -103,7 +103,7 @@ function createWindow() {
     if (blocked) _evt.preventDefault();
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.loadFile('index.html');
   mainWindow.webContents.on('did-finish-load', () =>
     console.log(`[main] PS4 Vault v${VERSION}`));
 }
