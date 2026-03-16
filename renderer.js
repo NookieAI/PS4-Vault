@@ -45,8 +45,20 @@
   }
 
   // ── Logo ──────────────────────────────────────────────────────────────────────
-  // Logo is set via static src="./assets/logo.jpg" in index.html.
-  // Electron resolves relative paths correctly in both dev and packaged builds.
+  // In packaged builds, assets live in extraResources (resources/assets/) outside
+  // the asar. Main process reads the file and returns a base64 data URL so the
+  // renderer never has to resolve any filesystem path.
+  (async () => {
+    try {
+      const dataUrl = await pkgApi.getLogoDataUrl();
+      if (dataUrl) {
+        const brand = $('brandLogo');
+        if (brand) brand.src = dataUrl;
+        const about = $('aboutLogo');
+        if (about) about.src = dataUrl;
+      }
+    } catch (_) {}
+  })();
 
   // ── Theme ─────────────────────────────────────────────────────────────────────
   function applyTheme(t) { document.body.dataset.theme = t; saveSetting('theme', t); }
@@ -124,7 +136,7 @@
     if (['gd','gde','gda','gdc','hg'].includes(c)) return 'Game';
     if (c === 'gp')  return 'Patch';
     if (c === 'ac')  return 'DLC';
-    if (['theme','gdc'].includes(c) || c.startsWith('t'))  return 'Theme';
+    if (c === 'theme' || c.startsWith('t'))  return 'Theme';
     if (c === 'app' || c === 'ap') return 'App';
     return c ? c.toUpperCase() : 'Other';
   }
@@ -1157,7 +1169,13 @@
   });
 
   // ── About modal ───────────────────────────────────────────────────────────────
-  function openAboutModal(){const bl=$('brandLogo'),al=$('aboutLogo');if(bl&&al&&bl.src)al.src=bl.src;pkgApi.getLogPath().then(p=>{const el=$('aboutLogPath');if(el){el.textContent='📋 Log: '+p;el.title='Click to open log folder';}}).catch(()=>{});$('aboutModalBackdrop').style.display='flex';}
+  function openAboutModal(){
+    pkgApi.getLogoDataUrl().then(dataUrl => {
+      if (dataUrl) { const al=$('aboutLogo'); if(al) al.src=dataUrl; }
+    }).catch(()=>{});
+    pkgApi.getLogPath().then(p=>{const el=$('aboutLogPath');if(el){el.textContent='📋 Log: '+p;el.title='Click to open log folder';}}).catch(()=>{});
+    $('aboutModalBackdrop').style.display='flex';
+  }
   function closeAboutModal(){$('aboutModalBackdrop').style.display='none';}
   $('btnAboutClose').addEventListener('click',closeAboutModal);
   $('btnAboutOk').addEventListener('click',closeAboutModal);

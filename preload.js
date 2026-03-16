@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('pkgApi', {
   openExternal:        (url)                            => ipcRenderer.invoke('open-external', url),
   copyToClipboard:     (text)                           => ipcRenderer.invoke('clipboard-write', text),
   getAllDrives:         ()                               => ipcRenderer.invoke('get-all-drives'),
-  getAppPath:          ()                               => ipcRenderer.invoke('get-app-path'),
   getLogoDataUrl:      ()                               => ipcRenderer.invoke('get-logo-data-url'),
 
   // ── Network helpers ─────────────────────────────────────────────────────────
@@ -25,7 +24,6 @@ contextBridge.exposeInMainWorld('pkgApi', {
   clearLibrary:        ()                               => ipcRenderer.invoke('clear-library'),
 
   // ── Settings ───────────────────────────────────────────────────────────────
-  getSetting:          (key)                            => ipcRenderer.invoke('get-setting', key),
   setSetting:          (key, val)                       => ipcRenderer.invoke('set-setting', key, val),
 
   // ── PKG integrity ──────────────────────────────────────────────────────────

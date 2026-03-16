@@ -1,7 +1,7 @@
 {
   "name": "ps4-vault",
   "version": "1.0.3",
-  "description": "PS4 PKG library manager — scan, organise, rename and transfer .pkg files",
+  "description": "PS4 PKG library manager \u2014 scan, organise, rename and transfer .pkg files",
   "main": "main.js",
   "author": {
     "name": "Nookie",
@@ -24,19 +24,28 @@
   "build": {
     "appId": "com.ps4vault.app",
     "productName": "PS4 Vault",
-    "copyright": "Copyright © 2026 PS4 Vault",
+    "copyright": "Copyright \u00a9 2026 PS4 Vault",
     "asar": true,
     "files": [
       "main.js",
       "preload.js",
       "renderer.js",
-      "index.html",
-      "assets/**/*"
+      "index.html"
     ],
     "win": {
       "target": [
-        { "target": "nsis",     "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "assets/icon.ico",
       "artifactName": "${productName}-${version}-portable.exe"
@@ -70,6 +79,12 @@
     },
     "extraMetadata": {
       "main": "main.js"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ]
   }
 }
