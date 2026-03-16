@@ -66,8 +66,7 @@
       "category": "Utility"
     },
     "directories": {
-      "output": "dist",
-      "buildResources": "assets"
+      "output": "dist"
     },
     "extraMetadata": {
       "main": "main.js"
