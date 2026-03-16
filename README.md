@@ -5,7 +5,7 @@
 <h1 align="center">PS4 Vault</h1>
 
 <p align="center">
-  The easiest way to manage your PS4 &amp; PS5 game collection on Windows
+  The easiest way to manage your PS4 &amp; PS5 game collection on Windows, Mac and Linux!
 </p>
 
 ---
