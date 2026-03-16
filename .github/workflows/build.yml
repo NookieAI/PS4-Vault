@@ -52,6 +52,22 @@ jobs:
       - name: Install dependencies
         run: npm install --no-package-lock
 
+      - name: Convert ico to icns for Mac
+        run: |
+          if [ ! -f assets/icon.icns ]; then
+            mkdir -p assets/icon.iconset
+            sips -z 16 16   assets/icon.ico --out assets/icon.iconset/icon_16x16.png   2>/dev/null || true
+            sips -z 32 32   assets/icon.ico --out assets/icon.iconset/icon_16x16@2x.png 2>/dev/null || true
+            sips -z 32 32   assets/icon.ico --out assets/icon.iconset/icon_32x32.png   2>/dev/null || true
+            sips -z 64 64   assets/icon.ico --out assets/icon.iconset/icon_32x32@2x.png 2>/dev/null || true
+            sips -z 128 128 assets/icon.ico --out assets/icon.iconset/icon_128x128.png 2>/dev/null || true
+            sips -z 256 256 assets/icon.ico --out assets/icon.iconset/icon_128x128@2x.png 2>/dev/null || true
+            sips -z 256 256 assets/icon.ico --out assets/icon.iconset/icon_256x256.png 2>/dev/null || true
+            sips -z 512 512 assets/icon.ico --out assets/icon.iconset/icon_256x256@2x.png 2>/dev/null || true
+            iconutil -c icns assets/icon.iconset -o assets/icon.icns || true
+            rm -rf assets/icon.iconset
+          fi
+
       - name: Build Mac
         run: npx electron-builder --mac --publish never
 
@@ -74,7 +90,13 @@ jobs:
           node-version: 20
 
       - name: Install Linux build deps
-        run: sudo apt-get install -y rpm fakeroot
+        run: sudo apt-get install -y rpm fakeroot imagemagick
+
+      - name: Generate PNG icon for Linux
+        run: |
+          if [ ! -f assets/icon.png ]; then
+            convert assets/icon.ico -thumbnail 512x512 -alpha on assets/icon.png || true
+          fi
 
       - name: Install dependencies
         run: npm install --no-package-lock
