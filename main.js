@@ -940,6 +940,7 @@ async function scanPkgsFtp(cfg, sender) {
   const controller = new AbortController();
   activeCancelFlags.set(sender.id, () => controller.abort());
   sender.send('scan-progress', { type: 'scan-start' });
+  let _ftpRetry = false;
 
   let dirClient;
   try {
@@ -1078,10 +1079,8 @@ async function scanPkgsFtp(cfg, sender) {
         if (!_ftpRetry) {
           _ftpRetry = true;
           await new Promise(r => setTimeout(r, 500));
-          // retry falls through to the outer catch being suppressed
           try {
-            // Re-attempt the entire item parse on transient errors
-            const hb2 = await ftpReadPkgHeader(client, pkg.remotePath);
+            const hb2 = await ftpReadPkgHeader(client, remotePath);
             if (hb2 && hb2.readUInt32BE(0) === PKG_MAGIC) {
               console.log('[ftp-scan] retry read OK for', fname);
             }
@@ -1227,7 +1226,7 @@ function categoryDisplay(cat) {
   if (['gd','gde','gda','gdc','hg'].includes(c)) return 'Game';
   if (c === 'gp')    return 'Patch';
   if (c === 'ac')    return 'DLC';
-  if (c === 'theme') return 'Theme';
+  if (c === 'theme' || c === 'gdc') return 'Theme';
   if (c === 'app' || c === 'ap') return 'App';
   return c ? c.toUpperCase() : 'Other';
 }
@@ -1511,7 +1510,7 @@ function getLocalIp() {
 }
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
-ipcMain.handle('get-app-path',  () => path.join(__dirname, 'assets'));
+ipcMain.handle('get-app-path',  () => __dirname);
 ipcMain.handle('get-local-ip',  () => getLocalIp());
 ipcMain.handle('get-log-path',  () => LOG_FILE);
 ipcMain.handle('open-log',      () => shell.openPath(LOG_FILE).catch(() => shell.showItemInFolder(LOG_FILE)));
