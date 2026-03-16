@@ -70,7 +70,8 @@
     },
     "linux": {
       "target": "AppImage",
-      "category": "Utility"
+      "category": "Utility",
+      "icon": "assets/icon.png"
     },
     "directories": {
       "output": "dist"
