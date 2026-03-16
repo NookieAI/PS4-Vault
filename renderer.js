@@ -42,6 +42,23 @@
   }
   function setStartupMsg(msg) {
     const el = $('startupMsg'); if (el) el.textContent = msg;
+    // Drive the progress bar based on loading stage
+    const bar = $('splashBar'); if (!bar) return;
+    if (!msg || msg === '') {
+      bar.classList.remove('indeterminate'); bar.style.width = '100%';
+    } else if (msg.startsWith('Loading saved')) {
+      bar.classList.remove('indeterminate'); bar.style.width = '20%';
+    } else if (msg.includes('items loaded')) {
+      bar.classList.remove('indeterminate'); bar.style.width = '60%';
+    } else if (msg.startsWith('Recovering')) {
+      bar.classList.remove('indeterminate'); bar.style.width = '65%';
+    } else if (msg.startsWith('Covers:')) {
+      // Parse "Covers: X / Y" for a real percentage
+      const m = msg.match(/(\d+)\s*\/\s*(\d+)/);
+      if (m) { const pct = 65 + Math.round((parseInt(m[1]) / parseInt(m[2])) * 30); bar.classList.remove('indeterminate'); bar.style.width = pct + '%'; }
+    } else {
+      bar.classList.add('indeterminate');
+    }
   }
 
   // ── Logo ──────────────────────────────────────────────────────────────────────
@@ -49,8 +66,9 @@
     for (let i = 0; i < 5; i++) {
       try {
         const p = await pkgApi.getAppPath();
+        const src = 'file:///' + p.replace(/\\/g, '/') + '/assets/logo.jpg';
         const logo = $('brandLogo');
-        if (logo && p) logo.src = 'file:///' + p.replace(/\\/g, '/') + '/assets/logo.jpg';
+        if (logo && p) logo.src = src;
         break;
       } catch (_) { await new Promise(r => setTimeout(r, 500)); }
     }

@@ -818,9 +818,33 @@
 </style>
 </head>
 <body data-theme="dark">
-<div id="startupOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;transition:opacity .3s;">
-  <div style="font-size:22px;font-weight:800;color:var(--title);letter-spacing:-.02em;">PS4 Vault</div>
-  <div style="font-size:12px;color:var(--muted);" id="startupMsg">Loading…</div>
+<div id="startupOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0;transition:opacity .35s;">
+  <style>
+    #splashTitle { font-size:26px;font-weight:800;color:var(--title);letter-spacing:-.03em;margin-bottom:6px; }
+    #splashSub   { font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px; }
+    #splashBarWrap {
+      width:220px;height:3px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;margin-bottom:16px;
+    }
+    #splashBar {
+      height:100%;width:0%;border-radius:99px;
+      background:linear-gradient(90deg,var(--accent),var(--accent-2));
+      transition:width .35s ease;
+    }
+    #splashBar.indeterminate {
+      width:40% !important;
+      animation:splash-slide 1.4s ease-in-out infinite;
+      transition:none;
+    }
+    @keyframes splash-slide {
+      0%   { transform:translateX(-100%); }
+      100% { transform:translateX(650%); }
+    }
+    #startupMsg { font-size:11.5px;color:var(--muted);min-height:16px;text-align:center; }
+  </style>
+  <div id="splashTitle">PS4 Vault</div>
+  <div id="splashSub">Game Library Manager</div>
+  <div id="splashBarWrap"><div id="splashBar" class="indeterminate"></div></div>
+  <div id="startupMsg">Loading…</div>
 </div>
 <div class="container">
 
