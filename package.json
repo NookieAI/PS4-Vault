@@ -1,6 +1,6 @@
 {
   "name": "ps4-vault",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "PS4 PKG library manager \u2014 scan, organise, rename and transfer .pkg files",
   "main": "main.js",
   "author": {
