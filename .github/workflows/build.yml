@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.0.3)'
+        description: 'Release tag (e.g. v1.0.4)'
         required: true
 
 permissions:
@@ -36,6 +36,36 @@ jobs:
           tag_name: ${{ steps.get-tag.outputs.tag }}
           draft: false
           generate_release_notes: true
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-package-lock
+
+      - name: Build Windows portable
+        run: npx electron-builder --win portable --publish never
+
+      - name: Rename to PS4 Vault.exe
+        run: |
+          $file = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          Rename-Item $file.FullName "PS4 Vault.exe"
+        shell: pwsh
+
+      - name: Upload Windows portable
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: dist/PS4 Vault.exe
 
   build-mac:
     needs: create-release
