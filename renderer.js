@@ -698,13 +698,23 @@
   }
   function handleScanProgress(d){
     if(d.type==='scan-start'||d.type==='scan-discovering') $('currentScanLabel').textContent='Discovering .pkg files…';
-    else if(d.type==='scan-found') $('currentScanLabel').textContent=`Found ${d.total} PKG${d.total!==1?'s':''}. Parsing…`;
-    else if(d.type==='scan-parsing') $('currentScanLabel').textContent=`Parsing ${d.done} / ${d.total}  ·  ${d.file}`;
+    else if(d.type==='scan-found'){
+      $('currentScanLabel').textContent=`Found ${d.total} PKG${d.total!==1?'s':''}. Parsing…`;
+      const pb=$('scanProgressBar'); if(pb){pb.style.width='0%';}
+    }
+    else if(d.type==='scan-parsing'){
+      $('currentScanLabel').textContent=`Parsing ${d.done} / ${d.total}  ·  ${d.file}`;
+      const pct = d.total > 0 ? Math.round(d.done / d.total * 100) : 0;
+      const pb=$('scanProgressBar'); if(pb) pb.style.width=pct+'%';
+    }
     else if(d.type==='scan-result'){
       if(!allItems.some(i=>i.filePath===d.item.filePath)){allItems.push(d.item);$('currentScanLabel').textContent=`Parsing… ${allItems.length} found`;applyFiltersSoon();}
     }
     else if(d.type==='scan-result-update'){const item=allItems.find(i=>i.filePath===d.filePath);if(item){if(d.fileSize!==undefined)item.fileSize=d.fileSize;applyFiltersSoon();}}
-    else if(d.type==='scan-done') $('currentScanLabel').textContent=`Done — ${d.total} PKG${d.total!==1?'s':''} from this source`;
+    else if(d.type==='scan-done'){
+      $('currentScanLabel').textContent=`Done — ${d.total} PKG${d.total!==1?'s':''} from this source`;
+      const pb=$('scanProgressBar'); if(pb) pb.style.width='100%';
+    }
     else if(d.type==='scan-error'){lastScanErrorMsg=d.message;toast('⚠ '+d.message,'err');}
   }
   function setScanUI(active){
@@ -716,14 +726,14 @@
   // ── Delete ────────────────────────────────────────────────────────────────────
   window.deleteOne=async(fp)=>{
     const item=allItems.find(i=>i.filePath===fp); if(!item)return;
-    if(!confirm(`Delete ${item.fileName}?\n\nThis cannot be undone.`))return;
+    if(!await showConfirm(`Delete ${item.fileName}?`, { sub:'This cannot be undone.', icon:'🗑' }))return;
     const results=await pkgApi.deletePkgs([item]);
     if(results[0]?.ok){allItems=allItems.filter(i=>i.filePath!==fp);selectedSet.delete(fp);applyFilters();toast(`Deleted ${item.fileName}`);}
     else toast('Delete failed: '+results[0]?.error,'err');
   };
   $('btnDeleteSelected').addEventListener('click',async()=>{
     const sel=allItems.filter(i=>selectedSet.has(i.filePath)); if(!sel.length)return;
-    if(!confirm(`Delete ${sel.length} PKG file${sel.length>1?'s':''}?\n\nThis cannot be undone.`))return;
+    if(!await showConfirm(`Delete ${sel.length} PKG file${sel.length>1?'s':''}?`, { sub:'This cannot be undone.', icon:'🗑' }))return;
     const results=await pkgApi.deletePkgs(sel);
     const ok=results.filter(r=>r.ok),errs=results.filter(r=>!r.ok);
     ok.forEach(r=>{allItems=allItems.filter(i=>i.filePath!==r.filePath);selectedSet.delete(r.filePath);});
@@ -845,9 +855,9 @@
   $('layoutSelect').addEventListener('change',e=>{const show=e.target.value==='rename'||e.target.value==='rename-organize';$('renameFmtRow').style.display=show?'flex':'none';});
 
   // ── Menu ──────────────────────────────────────────────────────────────────────
-  $('topMenu').addEventListener('change',e=>{
+  $('topMenu').addEventListener('change',async e=>{
     const v=e.target.value; e.target.value='';
-    if(v==='clear'){if(!confirm('Clear all scan results?'))return;allItems=[];filteredItems=[];selectedSet.clear();renderTable();updateCounts();}
+    if(v==='clear'){if(!await showConfirm('Clear all scan results?', { icon:'🧹', okLabel:'Clear', okClass:'btn' }))return;allItems=[];filteredItems=[];selectedSet.clear();renderTable();updateCounts();}
     if(v==='selectAll'){filteredItems.forEach(i=>selectedSet.add(i.filePath));renderTable();updateSelectionUI();}
     if(v==='unselectAll'){selectedSet.clear();renderTable();updateSelectionUI();}
     if(v==='exportCsv') exportCsv();
@@ -874,10 +884,10 @@
     a.href=url;a.download=`ps4-library-${Date.now()}.txt`;a.click();URL.revokeObjectURL(url);toast(`Exported ${lines.length} titles.`);
   }
   // Feature 11: delete duplicates
-  function deleteDuplicates(){
+  async function deleteDuplicates(){
     const dupes=allItems.filter(i=>i.isDuplicate);
     if(!dupes.length){toast('No duplicates found.');return;}
-    if(!confirm(`Delete ${dupes.length} duplicate PKG${dupes.length>1?'s':''}? One copy of each will be kept.\n\nThis cannot be undone.`))return;
+    if(!await showConfirm(`Delete ${dupes.length} duplicate PKG${dupes.length>1?'s':''}?`, { sub:'One copy of each game will be kept. This cannot be undone.', icon:'🗑' }))return;
     // Group by contentId, keep first, delete rest
     const seen=new Set(),toDelete=[];
     allItems.forEach(item=>{
@@ -910,11 +920,40 @@
   $('settingFtpPool')?.addEventListener('input',e=>{ftpPool=parseInt(e.target.value)||3;$('settingFtpPoolVal').textContent=ftpPool;saveSetting('ftpPool',ftpPool);pkgApi.setSetting?.('ftpPool',ftpPool);});
   $('btnSaveLibrary').addEventListener('click',async()=>{if(!allItems.length){toast('Nothing to save.','err');return;}const r=await pkgApi.saveLibrary(allItems);toast(r.ok?`✅ Saved ${allItems.length} items.`:'Failed: '+r.error,r.ok?'ok':'err');});
   $('btnLoadLibrary').addEventListener('click',async()=>{const r=await pkgApi.loadLibrary();if(!r.ok||!r.items?.length){toast('No saved library found.','err');return;}allItems=r.items;filteredItems=[];selectedSet.clear();activeCat='all';document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));$('catAll')?.classList.add('active');applyFilters();updateCounts();toast(`✅ Loaded ${r.items.length} items.`);closeSettingsModal();});
-  $('btnClearLibrary').addEventListener('click',async()=>{if(!confirm('Clear saved library?'))return;await pkgApi.clearLibrary?.();toast('Library cleared.');});
+  $('btnClearLibrary').addEventListener('click',async()=>{if(!await showConfirm('Clear saved library?', { sub:'Your current scan results will not be affected.', icon:'📚', okLabel:'Clear', okClass:'btn' }))return;await pkgApi.clearLibrary?.();toast('Library cleared.');});
 
   // ── Toast ──────────────────────────────────────────────────────────────────────
   let toastTimer=null;
   function toast(msg,type='ok'){const el=$('toast');el.textContent=msg;el.className='toast toast--'+type;el.style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{el.style.display='none';},3500);}
+
+  // ── Custom confirm modal — replaces native confirm() ─────────────────────
+  let _confirmResolve = null;
+  function showConfirm(msg, { sub='', icon='🗑', okLabel='Confirm', okClass='btn-danger' } = {}) {
+    return new Promise(resolve => {
+      _confirmResolve = resolve;
+      $('confirmMsg').textContent  = msg;
+      $('confirmSub').textContent  = sub;
+      $('confirmSub').style.display = sub ? 'block' : 'none';
+      $('confirmIcon').textContent = icon;
+      $('btnConfirmOk').textContent = okLabel;
+      $('btnConfirmOk').className   = okClass;
+      $('confirmBackdrop').style.display = 'flex';
+    });
+  }
+  $('btnConfirmOk').addEventListener('click', () => {
+    $('confirmBackdrop').style.display = 'none';
+    if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+  });
+  $('btnConfirmCancel').addEventListener('click', () => {
+    $('confirmBackdrop').style.display = 'none';
+    if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+  });
+  $('confirmBackdrop').addEventListener('click', e => {
+    if (e.target === $('confirmBackdrop')) {
+      $('confirmBackdrop').style.display = 'none';
+      if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+    }
+  });
 
   // ── Remote install modal ──────────────────────────────────────────────────────
   const installBackdrop=$('installModalBackdrop');
@@ -955,8 +994,9 @@
     if(!r.ok){toast('Verify failed: '+r.error,'err');return;}
     const shortHash=r.sha256.slice(0,16)+'…';
     const info=`${item.title||item.fileName}\n\nSHA-256: ${r.sha256}\nSize: ${fmtSize(r.size)}\n\nFile is complete — ${fmtSize(r.size)} bytes`;
-    if(confirm(`✓ ${item.fileName}\nSHA-256: ${shortHash}\nSize: ${fmtSize(r.size)}\n\nCopy full hash to clipboard?`))
-      pkgApi.copyToClipboard(r.sha256);
+    toast(`✓ ${item.fileName} — SHA-256: ${shortHash} (${fmtSize(r.size)})`);
+    pkgApi.copyToClipboard(r.sha256);
+    toast('SHA-256 hash copied to clipboard ✓');
   }
 
   // Feature 5 (FIX 6): Speed test button in install modal

@@ -27,7 +27,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.0';
+const VERSION        = '1.0.1';
 initLog();
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -726,12 +726,22 @@ async function scanPkgs(sourceDir, sender, scanDepth) {
         const i  = idx++;
         const fp = pkgFiles[i];
         sender.send('scan-progress', { type: 'scan-parsing', file: path.basename(fp), done, total: pkgFiles.length });
-        try {
-          const item = await parsePkgFile(fp);
+        let item = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            item = await parsePkgFile(fp);
+            break;
+          } catch (e) {
+            if (attempt === 0) {
+              await new Promise(r => setTimeout(r, 500)); // brief pause then retry
+            } else {
+              console.warn('[scan] skip', path.basename(fp), e.message);
+            }
+          }
+        }
+        if (item) {
           items.push(item);
           sender.send('scan-progress', { type: 'scan-result', item });
-        } catch (e) {
-          console.warn('[scan] skip', path.basename(fp), e.message);
         }
         done++;
         sender.send('scan-progress', { type: 'scan-parsing', file: path.basename(fp), done, total: pkgFiles.length });
@@ -1065,6 +1075,18 @@ async function scanPkgsFtp(cfg, sender) {
         items.push(item);
         sender.send('scan-progress', { type: 'scan-result', item });
       } catch (e) {
+        if (!_ftpRetry) {
+          _ftpRetry = true;
+          await new Promise(r => setTimeout(r, 500));
+          // retry falls through to the outer catch being suppressed
+          try {
+            // Re-attempt the entire item parse on transient errors
+            const hb2 = await ftpReadPkgHeader(client, pkg.remotePath);
+            if (hb2 && hb2.readUInt32BE(0) === PKG_MAGIC) {
+              console.log('[ftp-scan] retry read OK for', fname);
+            }
+          } catch (_) {}
+        }
         console.warn('[ftp-scan] skip', fname, e.message);
       }
       done++;
