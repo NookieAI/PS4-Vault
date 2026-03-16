@@ -87,12 +87,10 @@ jobs:
           node-version: 20
 
       - name: Install Linux build deps
-        run: sudo apt-get install -y rpm fakeroot imagemagick
+        run: sudo apt-get install -y rpm fakeroot
 
-      - name: Generate PNG icon in build/ folder
-        run: |
-          mkdir -p build
-          convert assets/icon.ico[0] -resize 512x512 build/icon.png
+      - name: Remove ico so electron-builder uses icon.png
+        run: rm -f assets/icon.ico assets/icon.icns
 
       - name: Install dependencies
         run: npm install --no-package-lock
