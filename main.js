@@ -11,7 +11,10 @@ let LOG_DIR  = '';
 let LOG_FILE = '';
 let   _logStream = null;
 function initLog() {
-  LOG_DIR  = app.getPath('userData');
+  // Use the same path as all previous versions (no space) so existing
+  // library/settings/logs are found. app.getPath('userData') would return
+  // 'PS4 Vault' (with space) which is a different folder.
+  LOG_DIR  = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault');
   LOG_FILE = path.join(LOG_DIR, 'ps4vault.log');
   try {
     if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -51,13 +54,13 @@ let mainWindow;
 // ── Window state persistence ──────────────────────────────────────────────────
 // WIN_STATE_FILE resolved lazily inside loadWinState/saveWinState
 function loadWinState() {
-  const WIN_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
+  const WIN_STATE_FILE = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault', 'window-state.json');
   try { return JSON.parse(fs.readFileSync(WIN_STATE_FILE, 'utf8')); } catch { return null; }
 }
 function saveWinState(win) {
   if (!win || win.isMinimized()) return;
   const s = { maximized: win.isMaximized(), ...( !win.isMaximized() ? win.getBounds() : {} ) };
-  const WIN_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
+  const WIN_STATE_FILE = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault', 'window-state.json');
   try { fs.writeFileSync(WIN_STATE_FILE, JSON.stringify(s)); } catch {}
 }
 
