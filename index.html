@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>PS4 Vault v1.3.0</title>
+  <title>PS4 Vault v1.0.0</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <!-- Inter + JetBrains Mono from Google Fonts (self-contained, no tracking) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -497,7 +497,9 @@
     .token-chip:hover { color: var(--accent-2); border-color: var(--accent); }
 
     /* ── FTP / console scan modal ── */
-    .console-scan-modal { width: 500px; }
+    .console-scan-modal { width: 480px; }
+    details > summary::-webkit-details-marker { display: none; }
+    #csAdvanced[open] #csAdvArrow { transform: rotate(90deg); }
     .ftp-field-group { display: flex; flex-direction: column; gap: 6px; }
     .ftp-field-group label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
     .ftp-field-group input { width: 100%; }
@@ -811,9 +813,15 @@
     [data-theme="light"] ::-webkit-scrollbar-thumb       { background: rgba(0,0,0,0.15); }
     [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
 
-  </style>
+  
+    .path-panel.drag-over { outline: 2px dashed var(--accent); outline-offset: 3px; background: rgba(124,58,237,0.05); border-radius: var(--radius); }
+</style>
 </head>
 <body data-theme="dark">
+<div id="startupOverlay" style="position:fixed;inset:0;z-index:99999;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;transition:opacity .3s;">
+  <div style="font-size:22px;font-weight:800;color:var(--title);letter-spacing:-.02em;">PS4 Vault</div>
+  <div style="font-size:12px;color:var(--muted);" id="startupMsg">Loading…</div>
+</div>
 <div class="container">
 
   <!-- ── Top bar ── -->
@@ -830,7 +838,7 @@
       </div>
       <div class="meta">
         <div class="app-title">PS4 Vault</div>
-        <div class="app-sub">v1.3.0</div>
+        <div class="app-sub">v1.0.0</div>
       </div>
     </div>
 
@@ -839,8 +847,11 @@
       <select id="topMenu" class="btn" style="margin-right:4px;">
         <option value="">Menu</option>
         <option value="selectAll">Select All</option>
+        <option value="deleteDuplicates">🗑 Delete Duplicates</option>
         <option value="unselectAll">Unselect All</option>
         <option value="exportCsv">Export CSV</option>
+        <option value="exportTxt">📄 Export TXT</option>
+        <option value="settings">⚙ Settings</option>
         <option value="clear">Clear Results</option>
         <option value="" disabled>──────────</option>
         <option value="checkUpdate">🔄 Check for Updates</option>
@@ -958,6 +969,7 @@
               <th class="check"><input id="chkHeader" type="checkbox" title="Select all" /></th>
               <th class="cover">COVER</th>
               <th data-sort="title">TITLE</th>
+              <th class="filename-col" data-sort="fileName" style="display:none">FILENAME</th>
               <th class="cat"  data-sort="category">TYPE</th>
               <th class="ver"  data-sort="version">VER</th>
               <th class="reg"  data-sort="region">REGION</th>
@@ -1002,6 +1014,7 @@
   <button class="ctx-item" id="ctxCopyId">🔖 Copy CUSA ID</button>
   <div class="ctx-sep"></div>
   <button class="ctx-item" id="ctxRename">✏️ Rename</button>
+  <button class="ctx-item" id="ctxVerify">🔍 Verify Integrity</button>
   <div class="ctx-sep"></div>
   <button class="ctx-item ctx-item--danger" id="ctxDelete">🗑 Delete</button>
 </div>
@@ -1018,66 +1031,118 @@
 <!-- ── Console Scan modal (PS4 / PS5 via FTP) ── -->
 <div id="consoleScanBackdrop" class="modal-backdrop" aria-hidden="true">
   <div class="modal console-scan-modal" role="dialog" aria-modal="true" aria-labelledby="consoleScanTitle">
-    <div class="modal-header">
-      <h4 id="consoleScanTitle">🎮 Scan PS4 / PS5</h4>
-      <div class="modal-sub">Connect to your PS4/PS5 over FTP to scan PKG files or installed games (CUSA titles only)</div>
-      <button class="close-btn" id="btnConsoleScanClose" aria-label="Close">✕</button>
-    </div>
-    <div class="modal-body" style="gap:10px;">
 
-      <!-- IP + port row -->
-      <div class="ftp-row">
-        <div class="ftp-field-group" style="flex:2">
-          <label>Console IP Address</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input id="csHost" type="text" placeholder="192.168.1.x" autocomplete="off" list="csHostHistory" style="flex:1" />
-            <datalist id="csHostHistory"></datalist>
-            <button id="btnConsoleScanDiscover" class="btn" style="white-space:nowrap;padding:6px 10px" title="Auto-detect PS4/PS5 on your network">🔍 Find</button>
+    <div class="modal-header" style="position:relative;flex-direction:row;align-items:center;">
+      <div>
+        <h4 id="consoleScanTitle" style="margin:0;font-size:15px;">PS4 / PS5 Console</h4>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">Connect over FTP to scan PKGs or installed games</div>
+      </div>
+      <button class="close-btn" id="btnConsoleScanClose" aria-label="Close" style="position:static;margin-left:auto;flex-shrink:0;">✕</button>
+    </div>
+
+    <div class="modal-body" style="gap:14px;padding-top:4px;">
+
+      <!-- ── Primary: IP + Find ── -->
+      <div style="display:flex;gap:8px;align-items:flex-end;">
+        <div style="flex:1;display:flex;flex-direction:column;gap:5px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Console IP Address</label>
+          <input id="csHost" type="text" placeholder="192.168.1.x" autocomplete="off"
+                 list="csHostHistory" style="font-size:14px;padding:8px 10px;font-family:'JetBrains Mono',ui-monospace,monospace;" />
+          <datalist id="csHostHistory"></datalist>
+        </div>
+        <button id="btnConsoleScanDiscover" class="btn-scan" style="height:38px;padding:0 16px;white-space:nowrap;flex-shrink:0;" title="Auto-scan your network for PS4/PS5">🔍 Find Console</button>
+      </div>
+
+      <!-- ── Profiles row ── -->
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="csProfiles" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid var(--card-border);background:var(--surface-2);color:var(--title);border-radius:var(--radius);cursor:pointer;" title="Load a saved console profile">
+          <option value="">📋 Saved consoles…</option>
+        </select>
+        <button id="btnCsSaveProfile" class="btn" style="white-space:nowrap;font-size:12px;" title="Save current IP as a profile">💾 Save</button>
+        <button id="btnConsoleScanTestConn" class="btn" style="white-space:nowrap;font-size:12px;" title="Test FTP connection">🔌 Test</button>
+      </div>
+
+      <!-- ── Status / feedback ── -->
+      <div id="csScanStatus" style="font-size:12.5px;padding:8px 10px;border-radius:var(--radius);
+           background:rgba(255,255,255,0.025);border:1px solid var(--card-border);
+           color:var(--muted);min-height:34px;display:flex;align-items:center;line-height:1.5;">
+        Enter your console IP above, or click Find Console.
+      </div>
+
+      <!-- ── Storage bar (shown after installed scan) ── -->
+      <div id="consoleStorageBar" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);margin-bottom:5px;">
+          <span>Console Storage Used</span>
+          <span id="consoleStorageLabel" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:var(--title);"></span>
+        </div>
+        <div style="height:6px;background:rgba(255,255,255,0.05);border-radius:99px;overflow:hidden;">
+          <div id="consoleStorageFill" style="height:100%;background:var(--accent);border-radius:99px;transition:width .5s ease;"></div>
+        </div>
+      </div>
+
+      <!-- ── Advanced (collapsed by default) ── -->
+      <details id="csAdvanced" style="border:1px solid var(--card-border);border-radius:var(--radius);overflow:hidden;">
+        <summary style="padding:8px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px;">
+          <span id="csAdvArrow" style="transition:transform .2s;display:inline-block;">▶</span> Advanced Settings
+        </summary>
+        <div style="padding:12px;display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--card-border);">
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;display:flex;flex-direction:column;gap:5px;">
+              <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">FTP Port</label>
+              <input id="csFtpPort" type="number" value="2121" min="1" max="65535" style="font-family:'JetBrains Mono',ui-monospace,monospace;" />
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:5px;">
+              <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">FTP Mode</label>
+              <select id="csFtpMode" title="Passive works through most routers. Active may be needed for some CFW builds.">
+                <option value="passive">Passive (recommended)</option>
+                <option value="active">Active</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;display:flex;flex-direction:column;gap:5px;">
+              <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Username</label>
+              <input id="csUser" type="text" value="anonymous" />
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:5px;">
+              <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Password</label>
+              <input id="csPass" type="password" placeholder="(leave blank)" />
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">PKG Scan Path</label>
+            <input id="csPkgPath" type="text" value="/" list="csPkgPathHistory"
+                   placeholder="/ for root, or /data/pkg, /mnt/usb0…"
+                   style="font-family:'JetBrains Mono',ui-monospace,monospace;" />
+            <datalist id="csPkgPathHistory">
+              <option value="/">/</option>
+              <option value="/data/pkg">/data/pkg</option>
+              <option value="/mnt/usb0">/mnt/usb0</option>
+              <option value="/mnt/usb1">/mnt/usb1</option>
+              <option value="/mnt/ext0">/mnt/ext0</option>
+            </datalist>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            <label style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Subnet Override <span style="font-weight:400;text-transform:none;">(leave blank = auto)</span></label>
+            <input id="csSubnet" type="text" placeholder="e.g. 192.168.0 — overrides auto-detect"
+                   style="font-family:'JetBrains Mono',ui-monospace,monospace;" />
           </div>
         </div>
-        <div class="ftp-field-group" style="flex:1">
-          <label>FTP Port</label>
-          <input id="csFtpPort" type="number" value="2121" min="1" max="65535" />
-        </div>
-      </div>
-
-      <!-- Auth row -->
-      <div class="ftp-row">
-        <div class="ftp-field-group">
-          <label>Username</label>
-          <input id="csUser" type="text" value="anonymous" />
-        </div>
-        <div class="ftp-field-group">
-          <label>Password</label>
-          <input id="csPass" type="password" placeholder="(leave blank)" />
-        </div>
-      </div>
-
-      <!-- Scan path -->
-      <div class="ftp-field-group">
-        <label>PKG scan path</label>
-        <input id="csPkgPath" type="text" value="/" list="csPkgPathHistory" />
-        <datalist id="csPkgPathHistory">
-          <option value="/">/</option>
-          <option value="/data/pkg">/data/pkg</option>
-          <option value="/mnt/usb0">/mnt/usb0</option>
-          <option value="/mnt/usb1">/mnt/usb1</option>
-          <option value="/mnt/ext0">/mnt/ext0</option>
-        </datalist>
-      </div>
-
-      <!-- Status -->
-      <div id="csScanStatus" style="font-size:12px;padding:6px 8px;border-radius:var(--radius);
-           background:rgba(255,255,255,0.02);border:1px solid var(--card-border);
-           color:var(--muted);min-height:30px;display:flex;align-items:center;"></div>
+      </details>
 
     </div>
-    <div class="modal-actions">
-      <button id="btnConsoleScanCancel" class="btn">Close</button>
-      <button id="btnConsoleScanTestConn" class="btn">🔌 Test FTP</button>
-      <button id="btnConsoleScanInstalled" class="btn" title="Scan installed games on the console">💾 Scan Installed</button>
-      <button id="btnConsoleScanPkgs" class="btn-scan">📦 Scan PKGs</button>
+
+    <!-- ── Primary actions ── -->
+    <div style="padding:14px 20px 16px;display:flex;gap:8px;border-top:1px solid var(--card-border);background:rgba(255,255,255,0.01);">
+      <button id="btnConsoleScanCancel" class="btn" style="margin-right:auto;">Close</button>
+      <button id="btnConsoleScanInstalled" class="btn" style="flex:1;padding:10px;font-size:13px;font-weight:600;" title="List every installed CUSA game with covers and file sizes">
+        💾 Installed Games
+      </button>
+      <button id="btnConsoleScanPkgs" class="btn-scan" style="flex:1;padding:10px;font-size:13px;" title="Scan the console filesystem for .pkg files">
+        📦 Scan PKGs
+      </button>
     </div>
+
   </div>
 </div>
 
@@ -1160,6 +1225,7 @@
     </div>
     <div class="modal-actions">
       <button id="goModalCancel" class="btn">Cancel</button>
+      <button id="goModalOpenFolder" class="btn" style="display:none" title="Open destination folder in Explorer">📂 Open Folder</button>
     </div>
   </div>
 </div>
@@ -1221,8 +1287,9 @@
       </div>
 
       <!-- Local IP info box -->
-      <div id="installLocalIpBox" class="install-local-ip" style="display:none">
-        🖥 This PC: <strong id="installLocalIp">—</strong> &nbsp;·&nbsp; PS4/PS5 downloads from: <code id="installBaseUrl" style="font-size:11px;">—</code>
+      <div id="installLocalIpBox" class="install-local-ip" style="display:none;align-items:center;gap:8px;">
+        🖥 This PC: <strong id="installLocalIp">—</strong> &nbsp;·&nbsp; <code id="installBaseUrl" style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</code>
+        <button id="btnCopyServerUrl" class="btn" style="padding:3px 8px;font-size:11px;flex-shrink:0;" title="Copy server URL — paste in PS4 browser to test connectivity">📋</button>
       </div>
 
       <!-- Warning / info box -->
@@ -1238,6 +1305,7 @@
     <div class="modal-actions">
       <button id="btnInstallCancel" class="btn" title="Cancel install or close this window">Close</button>
       <button id="btnTestPs4Conn" class="btn" title="Verify PS4/PS5 installer is reachable before sending">🔌 Test Connection</button>
+      <button id="btnSpeedTest" class="btn" title="Test download speed from PS4 to this PC">⚡ Speed Test</button>
       <button id="btnInstallStart" class="btn-install">📡 Send to PS4 / PS5</button>
     </div>
   </div>
@@ -1259,7 +1327,7 @@
         </div>
         <div style="text-align:left;">
           <div style="font-size:18px;font-weight:800;color:var(--title);letter-spacing:-.02em;line-height:1.2;">PS4 Vault</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:3px;">v1.3.0 · Made by Nookie</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px;">v1.0.0 · Made by Nookie</div>
           <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.7;">
             Scan · Organise · Rename<br>Transfer · Remote Install
           </div>
@@ -1289,6 +1357,110 @@
   <button id="btnUpdateDownload" style="display:none">⬇ Download Update</button>
   <button id="btnUpdateInstall"  style="display:none">🔄 Restart &amp; Install</button>
   <button id="btnUpdateDismiss">✕</button>
+</div>
+
+<!-- ── Keyboard Shortcuts Modal ── -->
+<div id="shortcutsBackdrop" class="modal-backdrop" style="z-index:28000;" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="width:460px;">
+    <div class="modal-header" style="flex-direction:row;align-items:center;position:relative;">
+      <h4 style="margin:0;font-size:15px;">⌨ Keyboard Shortcuts</h4>
+      <button class="close-btn" style="position:static;margin-left:auto;" onclick="document.getElementById('shortcutsBackdrop').style.display='none'">✕</button>
+    </div>
+    <div class="modal-body" style="gap:6px;">
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+        <tbody id="shortcutsTable">
+          <tr><td style="padding:5px 8px;color:var(--muted);width:140px;font-family:'JetBrains Mono',ui-monospace,monospace;">Ctrl+A</td><td style="padding:5px 8px;">Select all visible PKGs</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Ctrl+F</td><td style="padding:5px 8px;">Focus search bar</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Enter</td><td style="padding:5px 8px;">Open install modal for selection</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Delete</td><td style="padding:5px 8px;">Delete selected PKGs</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Escape</td><td style="padding:5px 8px;">Clear selection / close context menu</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Ctrl+/  or  ?</td><td style="padding:5px 8px;">Show this shortcuts panel</td></tr>
+          <tr style="border-top:1px solid var(--card-border);">
+            <td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Double-click</td><td style="padding:5px 8px;">Open install modal for row</td></tr>
+          <tr><td style="padding:5px 8px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;">Right-click</td><td style="padding:5px 8px;">Context menu (install, rename, delete, copy…)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-scan" onclick="document.getElementById('shortcutsBackdrop').style.display='none'">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Conflict Resolution Modal ── -->
+<div id="conflictBackdrop" class="modal-backdrop" style="z-index:26000;">
+  <div class="modal" style="width:520px;" id="conflictModal">
+    <div class="modal-header">
+      <h4 style="margin:0;font-size:14px;">⚠ File Conflict</h4>
+      <div class="modal-sub" id="conflictSubtitle"></div>
+    </div>
+    <div class="modal-body" style="gap:10px;">
+      <div id="conflictFilename" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--accent-2);padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:var(--radius);"></div>
+      <div style="font-size:12px;color:var(--muted);">A file with this name already exists at the destination. What would you like to do?</div>
+      <div style="display:flex;flex-direction:column;gap:6px;" id="conflictApplyAll" style="display:none">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="conflictApplyAllCheck"> Apply to all remaining conflicts
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="btnConflictSkip"      class="btn">Skip</button>
+      <button id="btnConflictRenameAuto" class="btn">Rename (_2)</button>
+      <button id="btnConflictOverwrite" class="btn-danger">Overwrite</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings Modal ── -->
+<div id="settingsBackdrop" class="modal-backdrop" style="z-index:27000;" onclick="if(event.target===this)closeSettingsModal()">
+  <div class="modal" style="width:440px;" id="settingsModal">
+    <div class="modal-header" style="flex-direction:row;align-items:center;position:relative;">
+      <h4 style="margin:0;font-size:15px;">⚙ Settings</h4>
+      <button class="close-btn" id="btnSettingsClose" style="position:static;margin-left:auto;">✕</button>
+    </div>
+    <div class="modal-body" style="gap:14px;">
+
+      <div class="form-block">
+        <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;">Scan Depth</label>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <input type="range" id="settingScanDepth" min="1" max="20" value="10" style="flex:1;accent-color:var(--accent);">
+          <span id="settingScanDepthVal" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--title);min-width:24px;">10</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">How deep to search subdirectories for .pkg files (1 = flat only, 20 = deep)</div>
+      </div>
+
+      <div class="form-block">
+        <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;">Install Queue Delay</label>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <input type="range" id="settingInstallDelay" min="0" max="60" value="8" step="1" style="flex:1;accent-color:var(--accent);">
+          <span id="settingInstallDelayVal" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--title);min-width:30px;">8s</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">Seconds to wait between queued installs (0 = no delay)</div>
+      </div>
+
+      <div class="form-block">
+        <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;">FTP Concurrency</label>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px;">
+          <input type="range" id="settingFtpPool" min="1" max="8" value="3" style="flex:1;accent-color:var(--accent);">
+          <span id="settingFtpPoolVal" style="font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:var(--title);min-width:18px;">3</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">Parallel FTP connections for scanning (higher = faster but more load on console)</div>
+      </div>
+      <div class="form-block">
+        <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.05em;">Library</label>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <button id="btnSaveLibrary" class="btn">💾 Save Library</button>
+          <button id="btnLoadLibrary" class="btn">📂 Load Saved Library</button>
+          <button id="btnClearLibrary" class="btn btn-danger" style="font-size:11px;">🗑 Clear</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Save your current scan results to disk — reload them next session without rescanning.</div>
+      </div>
+
+    </div>
+    <div class="modal-actions">
+      <button id="btnSettingsClose2" class="btn-scan">Done</button>
+    </div>
+  </div>
 </div>
 
 <script src="renderer.js"></script>

@@ -27,7 +27,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.3.0';
+const VERSION        = '1.0.0';
 initLog();
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -35,7 +35,7 @@ const ICON_MAX_BYTES = 800 * 1024;
 // 512 KB: captures the PKG header, full entry table, AND the SFO + icon0 for
 // the vast majority of PS4/PS5 PKGs in a single pread() call.
 // Eliminates the 2 extra fd.read() seeks per PKG that were the main bottleneck.
-const READ_BUF_SIZE  = 512 * 1024;
+const READ_BUF_SIZE  = 2 * 1024 * 1024; // 2 MB — captures icons/SFO for virtually all PKGs in one read
 
 const activeCancelFlags = new Map();
 
@@ -45,30 +45,45 @@ process.on('unhandledRejection', e => console.error('[main] Unhandled rejection:
 
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
+
+// ── Window state persistence ──────────────────────────────────────────────────
+const WIN_STATE_FILE = path.join(os.homedir(), 'AppData', 'Roaming', 'PS4Vault', 'window-state.json');
+function loadWinState() {
+  try { return JSON.parse(fs.readFileSync(WIN_STATE_FILE, 'utf8')); } catch { return null; }
+}
+function saveWinState(win) {
+  if (!win || win.isMinimized()) return;
+  const s = { maximized: win.isMaximized(), ...( !win.isMaximized() ? win.getBounds() : {} ) };
+  try { fs.writeFileSync(WIN_STATE_FILE, JSON.stringify(s)); } catch {}
+}
+
 function createWindow() {
-  // Remove the native menu bar entirely (File / Edit / View / Help)
   Menu.setApplicationMenu(null);
+  const ws = loadWinState();
 
   mainWindow = new BrowserWindow({
     title:  `PS4 Vault v${VERSION}`,
-    width:  1380,
-    height: 860,
-    show:   false,              // hidden until ready-to-show → no resize flash
+    width:  ws?.width  || 1380,
+    height: ws?.height || 860,
+    x: ws?.x, y: ws?.y,
+    show:   false,
     resizable: true,
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       nodeIntegration:  false,
       contextIsolation: true,
-      devTools:         false,  // hard-disable DevTools in production
+      devTools:         false,
     },
   });
 
-  // Maximize before showing → no visible resize animation
   mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
+    if (!ws || ws.maximized !== false) mainWindow.maximize();
     mainWindow.show();
   });
+
+  // Save state on close/move/resize
+  ['resize','move','close'].forEach(ev => mainWindow.on(ev, () => saveWinState(mainWindow)));
 
   // Belt-and-suspenders: close DevTools if somehow opened
   mainWindow.webContents.on('devtools-opened', () => {
@@ -93,6 +108,20 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+// Renderer crash → recreate window rather than leaving a white screen
+app.on('render-process-gone', (event, wc, details) => {
+  console.error('[main] Renderer crash:', details.reason);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.reload();
+    console.log('[main] Reloaded renderer after crash');
+  }
+});
+app.on('child-process-gone', (_e, details) => {
+  if (details.type === 'GPU') {
+    console.warn('[main] GPU process gone:', details.reason);
+  }
+});
 
 // ── Auto-updater (electron-updater + GitHub Releases) ────────────────────────
 // Checks for updates on startup and notifies the renderer.
@@ -538,15 +567,30 @@ async function parsePkgFile(filePath) {
         if (isJpeg) { iconDataUrl = `data:image/jpeg;base64,${iconBuf.slice(0, iconBytes).toString('base64')}`; break; }
       }
     }
-    if (!iconDataUrl && iconOff === 0) {
-      // Fallback: only scan if entry table had no icon entry
+    // Fallback: scan the buffer for any PNG/JPEG if we still have no icon.
+    // Catches PKGs where the entry table offset was wrong, encrypted, or
+    // the icon sat outside our expected offset range.
+    if (!iconDataUrl) {
       iconDataUrl = scanBufferForIcon(hdrBuf.slice(0, bytesRead));
+    }
+
+    // ── Extended icon search: read around bodyOff64 if still missing ────────
+    // Handles PKGs where icon is stored deep in the body beyond our READ_BUF_SIZE
+    if (!iconDataUrl && bodyOff64 > bytesRead && bodyOff64 < fileSize) {
+      const winSz  = Math.min(1024 * 1024, fileSize - bodyOff64); // 1 MB window
+      const winBuf = Buffer.alloc(winSz);
+      try {
+        const { bytesRead: bwr } = await fd.read(winBuf, 0, winSz, bodyOff64);
+        if (bwr > 8) iconDataUrl = scanBufferForIcon(winBuf.slice(0, bwr));
+      } catch (_) {}
     }
 
     // ── Resolve final fields ──────────────────────────────────────────────────
     const sfoTitle = sfoData.TITLE || sfoData.TITLE_00 || sfoData.TITLE_01 ||
                      sfoData.TITLE_02 || sfoData.TITLE_03 || '';
-    const category = sfoData.CATEGORY || '';
+    const category = sfoData.CATEGORY ||
+      // Fallback: infer category from filename if SFO has none
+      (/theme/i.test(path.basename(filePath)) ? 'THEME' : '');
     const appVer   = sfoData.APP_VER  || '';
     const sysVer   = sfoData.SYSTEM_VER != null ? fwFromInt(sfoData.SYSTEM_VER) : '';
     if (!titleId && sfoData.TITLE_ID) titleId = sfoData.TITLE_ID;
@@ -607,6 +651,8 @@ async function findPkgFiles(dir, signal, maxDepth = MAX_SCAN_DEPTH) {
           await walk(full, depth + 1);
         } else if (e.isFile() && e.name.toLowerCase().endsWith('.pkg')) {
           results.push(full);
+        } else if (e.isFile() && (e.name.toLowerCase().endsWith('.pkg.part') || (e.name.toLowerCase().endsWith('.part') && e.name.toLowerCase().includes('.pkg')))) {
+          results.push(full + '|partial');
         }
       } catch { /* skip individual entry errors */ }
     }
@@ -616,7 +662,7 @@ async function findPkgFiles(dir, signal, maxDepth = MAX_SCAN_DEPTH) {
   return results;
 }
 
-async function scanPkgs(sourceDir, sender) {
+async function scanPkgs(sourceDir, sender, scanDepth) {
   const controller = new AbortController();
   activeCancelFlags.set(sender.id, () => controller.abort());
 
@@ -655,7 +701,10 @@ async function scanPkgs(sourceDir, sender) {
     }
 
     sender.send('scan-progress', { type: 'scan-discovering' });
-    const pkgFiles = await findPkgFiles(sourceDir, controller.signal);
+    const rawFiles  = await findPkgFiles(sourceDir, controller.signal, scanDepth || MAX_SCAN_DEPTH);
+    // Separate partial files from complete ones
+    const pkgFiles  = rawFiles.filter(f => !f.endsWith('|partial'));
+    const partFiles = rawFiles.filter(f => f.endsWith('|partial')).map(f => f.replace('|partial',''));
     sender.send('scan-progress', { type: 'scan-found', total: pkgFiles.length });
 
     if (pkgFiles.length === 0) {
@@ -702,6 +751,19 @@ async function scanPkgs(sourceDir, sender) {
       if (group.length > 1) group.forEach(i => { i.isDuplicate = true; });
     }
 
+    // Add partial PKG entries as warnings
+    for (const partPath of (partFiles || [])) {
+      const item = {
+        filePath: partPath, fileName: path.basename(partPath),
+        dirPath: path.dirname(partPath), fileSize: 0,
+        title: path.basename(partPath, '.part').replace('.pkg','') + ' (incomplete)',
+        sfoTitle: '', fnTitle: '', titleId: '', category: '', appVer: '', sysVer: '',
+        region: '', contentId: '', pkgType: 0, iconDataUrl: null,
+        isDuplicate: false, isFtp: false, isPartial: true,
+      };
+      items.push(item);
+      sender.send('scan-progress', { type: 'scan-result', item });
+    }
     sender.send('scan-progress', { type: 'scan-done', total: items.length });
     return items;
 
@@ -731,6 +793,11 @@ async function makeFtpClient(cfg) {
     password: cfg.pass || '',
     secure:   false,
   });
+  // Passive mode is default and works through NAT/routers.
+  // Active mode sends PORT commands — some PS4 CFW FTP servers require it.
+  if (cfg.activeMode) {
+    client.ftp.passive = false;
+  }
   return client;
 }
 
@@ -755,8 +822,9 @@ async function ftpFindPkgs(client, remotePath, signal, depth = 0) {
     if (item.isDirectory) {
       results.push(...await ftpFindPkgs(client, full, signal, depth + 1));
     } else if (item.name.toLowerCase().endsWith('.pkg') && item.size > 1024 * 1024) {
-      // Minimum 1 MB — filters out PS4 internal app.pkg files (~4-8 KB each)
       results.push({ remotePath: full, size: item.size });
+    } else if (item.name.toLowerCase().includes('.pkg.part') || item.name.toLowerCase().endsWith('.part')) {
+      results.push({ remotePath: full, size: item.size, isPartial: true });
     }
   }
   return results;
@@ -764,10 +832,34 @@ async function ftpFindPkgs(client, remotePath, signal, depth = 0) {
 
 // ── FTP header download ───────────────────────────────────────────────────────
 // Download the first N bytes of a remote PKG.
-// 128 KB captures the PKG header + full entry table + SFO + icon0 for
+// 2 MB captures the PKG header + full entry table + SFO + icon0 for
 // the vast majority of PS4/PS5 PKGs. Using REST (byte-range) when the server
 // supports it; falling back to a truncated stream otherwise.
-const FTP_HDR_SIZE = 128 * 1024;
+const FTP_HDR_SIZE = 2 * 1024 * 1024; // 2 MB — matches READ_BUF_SIZE, captures most icons in one FTP read
+
+// Read a byte range from an FTP file by seeking with REST command.
+// Falls back to null if the server doesn't support REST (RETR from offset 0).
+async function ftpReadRange(client, remotePath, offset, length) {
+  const chunks = [];
+  let total = 0;
+  try {
+    const { Writable } = require('stream');
+    const w = new Writable({
+      write(chunk, _, cb) {
+        if (total < length) {
+          chunks.push(chunk.slice(0, Math.min(chunk.length, length - total)));
+        }
+        total += chunk.length;
+        cb();
+      }
+    });
+    // basic-ftp supports downloadTo with offset via client.send('REST', offset) + RETR
+    await client.downloadTo(w, remotePath, offset);
+    return chunks.length ? Buffer.concat(chunks) : null;
+  } catch (_) {
+    return null;
+  }
+}
 
 async function ftpReadPkgHeader(client, remotePath) {
   // Do NOT call this.destroy() inside the Writable — it aborts the FTP data channel
@@ -802,7 +894,7 @@ async function ftpReadPkgHeader(client, remotePath) {
 // Maintains a small pool of persistent FTP clients so we can process multiple
 // PKGs in parallel without paying the TCP+login overhead for every file.
 // Eliminates the #1 cause of slow FTP scans: new connection per PKG.
-const FTP_POOL_SIZE = 3; // PS4/PS5 FTP servers handle 3-4 concurrent sessions well
+let FTP_POOL_SIZE = 3 // settable via set-setting; // PS4/PS5 FTP servers handle 3-4 concurrent sessions well
 
 async function withFtpPool(cfg, pkgList, signal, onItem) {
   // Pre-connect all pool clients in parallel
@@ -936,7 +1028,18 @@ async function scanPkgsFtp(cfg, sender) {
             if (isJpeg) { iconDataUrl = `data:image/jpeg;base64,${iconBuf.toString('base64')}`; break; }
           }
         }
+        // Primary scan
         if (!iconDataUrl) iconDataUrl = scanBufferForIcon(headerBuf);
+        // If still missing and bodyOffset is beyond our buffer, try scanning there
+        if (!iconDataUrl) {
+          try {
+            const bodyOff = Number(headerBuf.readBigUInt64BE(0x20));
+            if (bodyOff > headerBuf.length && bodyOff < size) {
+              const winBuf = await ftpReadRange(client, remotePath, bodyOff, Math.min(1024 * 1024, size - bodyOff));
+              if (winBuf) iconDataUrl = scanBufferForIcon(winBuf);
+            }
+          } catch (_) {}
+        }
 
         if (!titleId && sfoData.TITLE_ID) titleId = sfoData.TITLE_ID;
         const sfoTitle = sfoData.TITLE || sfoData.TITLE_00 || sfoData.TITLE_01 ||
@@ -1146,8 +1249,8 @@ ipcMain.handle('clipboard-write', async (_event, text) => {
   clipboard.writeText(text || '');
 });
 
-ipcMain.handle('scan-pkgs', async (event, sourceDir) => {
-  return scanPkgs(sourceDir, event.sender);
+ipcMain.handle('scan-pkgs', async (event, sourceDir, scanDepth) => {
+  return scanPkgs(sourceDir, event.sender, scanDepth);
 });
 
 // ── FTP IPC ───────────────────────────────────────────────────────────────────
@@ -1197,6 +1300,7 @@ ipcMain.handle('rename-pkg', async (_event, item, newName) => {
     try {
       client = await makeFtpClient(item.ftpCfg);
       await client.rename(item.filePath, newRemote);
+      try { client?.close(); } catch (_) {}
       return { ok: true, newPath: newRemote, newFileName: sanitized };
     } catch (e) { return { error: e.message }; }
     finally { try { client?.close(); } catch (_) {} }
@@ -1222,8 +1326,16 @@ ipcMain.handle('check-pkg-conflicts', async (_event, items, destDir, layout, ren
 });
 
 // go-pkgs: handles Local→Local, FTP→Local (download), Local→FTP (upload), FTP→FTP (relay)
-ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFormat, ftpDest) => {
-  const sender     = event.sender;
+ipcMain.handle('go-pkgs', (event, items, destDir, action, layout, renameFormat, ftpDest, conflictModes) => {
+  _runGoPkgs(event.sender, items, destDir, action, layout, renameFormat, ftpDest, conflictModes).catch(e => {
+    event.sender.send('go-progress', { type: 'go-file-error', file: '', error: e.message });
+    event.sender.send('go-progress', { type: 'go-done', ok: 0, error: 1, skipped: 0 });
+  });
+  return { ok: true, started: true };
+});
+
+async function _runGoPkgs(sender, items, destDir, action, layout, renameFormat, ftpDest, conflictModes) {
+  // conflictModes: { [filePath]: 'skip'|'overwrite'|'rename' }
   const controller = new AbortController();
   activeCancelFlags.set(sender.id, () => controller.abort());
   const cancelCheck = () => controller.signal.aborted;
@@ -1252,6 +1364,24 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
         destPath  = (ftpDest.path || '/').replace(/\/$/, '') + '/' + rel.replace(/\\/g, '/').replace(/^\//, '');
       } else {
         destPath = buildDestPath(item, destDir, layout, renameFormat);
+      }
+
+      // Apply conflict resolution mode
+      if (conflictModes) {
+        const mode = conflictModes[item.filePath];
+        if (mode === 'skip') { results.skipped++; continue; }
+        if (mode === 'rename') {
+          // Auto-rename: append _2, _3... until no conflict
+          const ext  = path.extname(destPath);
+          const base = destPath.slice(0, -ext.length);
+          let n = 2;
+          while (true) {
+            const candidate = `${base}_${n}${ext}`;
+            try { await fs.promises.access(candidate, fs.constants.F_OK); n++; }
+            catch { destPath = candidate; break; }
+          }
+        }
+        // 'overwrite' or undefined: proceed normally (fs will overwrite)
       }
 
       sender.send('go-progress', { type: 'go-file-start', file: item.fileName, current: i+1, total, destPath });
@@ -1325,7 +1455,7 @@ ipcMain.handle('go-pkgs', async (event, items, destDir, action, layout, renameFo
     sender.send('go-progress', { type: 'go-done', ...results });
   }
   return results;
-});
+};
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1364,6 +1494,277 @@ ipcMain.handle('get-local-ip',  () => getLocalIp());
 ipcMain.handle('get-log-path',  () => LOG_FILE);
 ipcMain.handle('open-log',      () => shell.openPath(LOG_FILE).catch(() => shell.showItemInFolder(LOG_FILE)));
 ipcMain.handle('open-log-folder', () => shell.openPath(LOG_DIR).catch(() => {}));
+
+// ── Library persistence ───────────────────────────────────────────────────────
+const LIBRARY_FILE = path.join(LOG_DIR, 'library.json');
+ipcMain.handle('save-library', async (_e, items) => {
+  try {
+    // Strip iconDataUrl blobs before saving (they're regenerated on scan)
+    // Keep iconDataUrl so covers display after library reload.
+    // Strip only ftpCfg (contains credentials) and _b64key (runtime-only).
+    const slim = items.map(i => { const { ftpCfg, _b64key, ...rest } = i; return rest; });
+    await fs.promises.writeFile(LIBRARY_FILE, JSON.stringify(slim));
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('load-library', async () => {
+  try {
+    const raw  = await fs.promises.readFile(LIBRARY_FILE, 'utf8');
+    const items = JSON.parse(raw);
+    // Normalise items: fill any fields that may be missing from older saved libraries.
+    // This makes PS4 Vault resilient to schema changes between versions.
+    const normalised = items.map(item => {
+      // Recompute fnTitle from fileName if missing (was not saved in older versions)
+      const fnTitle = item.fnTitle != null
+        ? item.fnTitle
+        : titleFromFilename(item.filePath || item.fileName || '');
+      // Recompute best-effort title
+      const title = item.sfoTitle || fnTitle || item.titleId || item.fileName || '';
+      // Ensure dirPath is set (older saves may have stored it differently)
+      const dirPath = item.dirPath ||
+        (item.filePath ? path.dirname(item.filePath) : '');
+      return {
+        // Mandatory display fields — never undefined
+        filePath:    item.filePath    || '',
+        fileName:    item.fileName    || path.basename(item.filePath || ''),
+        dirPath,
+        fileSize:    item.fileSize    || 0,
+        contentId:   item.contentId   || '',
+        titleId:     item.titleId     || '',
+        title,
+        sfoTitle:    item.sfoTitle    || '',
+        fnTitle:     fnTitle          || '',
+        category:    item.category    || '',
+        appVer:      item.appVer      || '',
+        sysVer:      item.sysVer      || '',
+        region:      item.region      || '',
+        pkgType:     item.pkgType     ?? 0,
+        iconDataUrl: item.iconDataUrl || null,
+        isDuplicate: item.isDuplicate ?? false,
+        isFtp:       item.isFtp       ?? false,
+        isInstalled: item.isInstalled ?? false,
+        isPartial:   item.isPartial   ?? false,
+        ftpCfg:      null, // never persist credentials
+      };
+    });
+    return { ok: true, items: normalised };
+  } catch { return { ok: false, items: [] }; }
+});
+
+// Refetch covers for local PKGs missing iconDataUrl.
+// Streams results back via 'cover-ready' events as they complete — 
+// UI updates live, no waiting for all files to finish.
+// Uses SCAN_CONCURR parallel workers for maximum throughput.
+ipcMain.handle('refetch-covers', async (event, filePaths) => {
+  if (!filePaths.length) return { ok: true };
+  const sender   = event.sender;
+  const queue    = [...filePaths];
+  const concurr  = Math.min(SCAN_CONCURR, queue.length, 8);
+  let   done     = 0;
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      const fp = queue.shift();
+      if (!fp) break;
+      try {
+        await fs.promises.access(fp, fs.constants.R_OK);
+        const parsed = await parsePkgFile(fp);
+        if (parsed.iconDataUrl) {
+          // Send immediately so the cover appears as soon as it's ready
+          if (!sender.isDestroyed())
+            sender.send('cover-ready', { filePath: fp, iconDataUrl: parsed.iconDataUrl });
+        }
+      } catch (_) {}
+      done++;
+      // Progress ping every 10 items
+      if (done % 10 === 0 && !sender.isDestroyed())
+        sender.send('cover-ready', { progress: done, total: filePaths.length });
+    }
+  };
+
+  // Launch workers in parallel, return immediately
+  Promise.all(Array.from({ length: concurr }, worker))
+    .then(() => {
+      if (!sender.isDestroyed())
+        sender.send('cover-ready', { done: true, total: filePaths.length });
+    })
+    .catch(() => {});
+
+  return { ok: true, total: filePaths.length };
+});
+ipcMain.handle('clear-library', async () => {
+  try { await fs.promises.unlink(LIBRARY_FILE); } catch {}
+  return { ok: true };
+});
+
+// ── Settings get/set ──────────────────────────────────────────────────────────
+const SETTINGS_FILE = path.join(LOG_DIR, 'settings.json');
+ipcMain.handle('get-setting', async (_e, key) => {
+  try { const s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE,'utf8')); return s[key]; } catch { return null; }
+});
+ipcMain.handle('set-setting', async (_e, key, val) => {
+  let s = {}; try { s = JSON.parse(await fs.promises.readFile(SETTINGS_FILE,'utf8')); } catch {}
+  s[key] = val;
+  await fs.promises.writeFile(SETTINGS_FILE, JSON.stringify(s));
+  // Apply certain settings immediately at runtime
+  if (key === 'ftpPool' && typeof val === 'number' && val >= 1 && val <= 8) {
+    FTP_POOL_SIZE = val;
+    console.log(`[settings] FTP_POOL_SIZE = ${val}`);
+  }
+  return { ok: true };
+});
+
+// ── PKG integrity check ───────────────────────────────────────────────────────
+ipcMain.handle('verify-pkg', async (_e, filePath) => {
+  try {
+    const hash = crypto.createHash('sha256');
+    const stat = await fs.promises.stat(filePath);
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on('data', chunk => hash.update(chunk));
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
+    return { ok: true, sha256: hash.digest('hex'), size: stat.size };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ── Network speed test to PS4 ─────────────────────────────────────────────────
+ipcMain.handle('speed-test-ps4', async (_e, ps4Ip, ps4Port, fileServerPort) => {
+  // Measure LAN throughput by timing an FTP download from PS4.
+  // We cut the stream after TEST_BYTES so we never download an entire 50GB game.
+  // Speed measured = bytes received / wall-clock seconds = real network throughput.
+  const TEST_BYTES = 8 * 1024 * 1024; // 8 MB target — enough for accuracy, fast to complete
+  let client;
+
+  try {
+    const ftpCfg = { host: ps4Ip, port: 2121, user: 'anonymous', pass: '' };
+    client = await makeFtpClient(ftpCfg);
+
+    // ── Find the largest readable file on the PS4 ─────────────────────────────
+    // Walk directories in order, pick the single largest file we can find.
+    // We prefer files >TEST_BYTES so we can cut early rather than reading the whole thing.
+    const candidateDirs = [
+      '/user/app', '/system', '/system_ex', '/user/data',
+      '/system_data', '/mnt/sandbox', '/',
+    ];
+    let testFile = null, testSize = 0;
+    for (const dir of candidateDirs) {
+      try {
+        const entries = await client.list(dir);
+        for (const e of entries) {
+          if (!e.isDirectory && e.size > testSize) {
+            const base = dir === '/' ? '' : dir;
+            testFile = base + '/' + e.name;
+            testSize = e.size;
+          }
+        }
+        // Recurse one level into directories to find game data
+        if (testSize < TEST_BYTES) {
+          for (const e of entries) {
+            if (!e.isDirectory) continue;
+            try {
+              const sub = await client.list((dir === '/' ? '' : dir) + '/' + e.name);
+              for (const f of sub) {
+                if (!f.isDirectory && f.size > testSize) {
+                  testFile = (dir === '/' ? '' : dir) + '/' + e.name + '/' + f.name;
+                  testSize = f.size;
+                }
+              }
+            } catch (_) {}
+            if (testSize >= TEST_BYTES) break;
+          }
+        }
+      } catch (_) {}
+      if (testSize >= TEST_BYTES) break;
+    }
+
+    if (!testFile || testSize < 1024) {
+      return { ok: false, error: 'No readable files found on PS4. Make sure FTP server is running and files exist.' };
+    }
+
+    console.log('[speed-test] testing with ' + testFile + ' (' + (testSize/1024/1024).toFixed(1) + ' MB)');
+
+    // ── Download and cut after TEST_BYTES ─────────────────────────────────────
+    // Use a Writable that stops accepting data once we have enough.
+    // We destroy the underlying socket cleanly so the FTP session recovers.
+    const { Writable } = require('stream');
+    let received = 0;
+    let startTime = 0;
+    let cutDone = false;
+
+    const result = await new Promise((resolve) => {
+      const sink = new Writable({
+        write(chunk, _, cb) {
+          if (!startTime) startTime = Date.now();
+          received += chunk.length;
+          cb();
+          // Cut the stream once we have enough data
+          if (!cutDone && received >= TEST_BYTES) {
+            cutDone = true;
+            const elapsed = (Date.now() - startTime) / 1000;
+            const mbps    = parseFloat((received / elapsed / 1024 / 1024).toFixed(2));
+            const mbpsNet = parseFloat((received * 8 / elapsed / 1024 / 1024).toFixed(1));
+            // Signal done — destroy will cause downloadTo to reject, we catch below
+            this.destroy();
+            resolve({ ok: true, mbps, mbpsNet, elapsed: Math.round(elapsed * 1000), size: received });
+          }
+        },
+        final(cb) {
+          // Stream ended naturally (file smaller than TEST_BYTES) — still measure it
+          if (!cutDone && received > 0 && startTime) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (elapsed >= 0.2 && received >= 64 * 1024) {
+              const mbps    = parseFloat((received / elapsed / 1024 / 1024).toFixed(2));
+              const mbpsNet = parseFloat((received * 8 / elapsed / 1024 / 1024).toFixed(1));
+              resolve({ ok: true, mbps, mbpsNet, elapsed: Math.round(elapsed * 1000), size: received });
+            } else {
+              resolve({ ok: false, error: 'File too small or transfer too fast — try with a larger file on the console' });
+            }
+          }
+          cb();
+        }
+      });
+
+      client.downloadTo(sink, testFile, 0).catch(e => {
+        // Expected: we destroyed the stream early. If we already resolved, ignore.
+        if (!cutDone && received > 0 && startTime) {
+          const elapsed = (Date.now() - startTime) / 1000;
+          if (elapsed >= 0.2 && received >= 64 * 1024) {
+            const mbps    = parseFloat((received / elapsed / 1024 / 1024).toFixed(2));
+            const mbpsNet = parseFloat((received * 8 / elapsed / 1024 / 1024).toFixed(1));
+            resolve({ ok: true, mbps, mbpsNet, elapsed: Math.round(elapsed * 1000), size: received });
+          } else {
+            resolve({ ok: false, error: e.message });
+          }
+        }
+      });
+
+      // Timeout: 20s max
+      setTimeout(() => {
+        if (!cutDone) {
+          if (received > 64 * 1024 && startTime) {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const mbps    = parseFloat((received / elapsed / 1024 / 1024).toFixed(2));
+            const mbpsNet = parseFloat((received * 8 / elapsed / 1024 / 1024).toFixed(1));
+            resolve({ ok: true, mbps, mbpsNet, elapsed: Math.round(elapsed * 1000), size: received, note: 'timeout' });
+          } else {
+            resolve({ ok: false, error: 'Timed out — PS4 FTP connected but no data received' });
+          }
+        }
+      }, 20000);
+    });
+
+    console.log('[speed-test] ' + (result.ok ? result.mbps + ' MB/s (' + result.mbpsNet + ' Mbps)' : 'failed: ' + result.error));
+    return result;
+
+  } catch (e) {
+    console.warn('[speed-test] error:', e.message);
+    return { ok: false, error: e.message };
+  } finally {
+    try { client?.close(); } catch (_) {}
+  }
+});
 
 // ── Quick TCP port probe ──────────────────────────────────────────────────────
 function tcpProbe(hostname, port, timeoutMs = 5000) {
@@ -1577,9 +1978,11 @@ async function startPkgServer(port, items) {
       pkgServerPort = port;
       console.log(`[pkg-server] listening on 0.0.0.0:${port} (DPI-compatible mode)`);
 
-      // Configure Windows Firewall: allow inbound + enable rules on all profiles
+      // Configure Windows Firewall asynchronously — NEVER use execSync here.
+      // execSync blocks the entire main process event loop, freezing all IPC,
+      // button clicks, and progress events while PowerShell runs (up to 30s).
       if (process.platform === 'win32') {
-        const { execSync } = require('child_process');
+        const { exec } = require('child_process');
         const ruleName = `PS4Vault-PKGServer-${port}`;
         const psCmd = [
           `Remove-NetFirewallRule -DisplayName '${ruleName}' -ErrorAction SilentlyContinue`,
@@ -1588,27 +1991,23 @@ async function startPkgServer(port, items) {
           `Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Allow`,
         ].join('; ');
 
-        const tryPS = (cmd, elevated) => {
-          try {
-            if (elevated) {
-              const escaped = cmd.replace(/'/g, "''");
-              execSync(`powershell -NoProfile -NonInteractive -Command "Start-Process powershell -ArgumentList '-NoProfile -NonInteractive -Command ''${escaped}'''' -Verb RunAs -Wait"`,
-                { windowsHide: false, timeout: 30000, stdio: 'pipe' });
-            } else {
-              execSync(`powershell -NoProfile -NonInteractive -Command "${cmd.replace(/"/g, '\\"')}"`,
-                { windowsHide: true, timeout: 8000, stdio: 'pipe' });
-            }
-            return true;
-          } catch (_) { return false; }
-        };
+        // Run PowerShell async — UI stays fully responsive during firewall setup
+        const runPS = (cmd, elevated) => new Promise(res => {
+          const shell = elevated
+            ? `powershell -NoProfile -NonInteractive -Command "Start-Process powershell -ArgumentList '-NoProfile -NonInteractive -Command ''${cmd.replace(/'/g,"''")}''''' -Verb RunAs -Wait"`
+            : `powershell -NoProfile -NonInteractive -Command "${cmd.replace(/"/g,'\\"')}"`;
+          exec(shell, { windowsHide: !elevated, timeout: elevated ? 35000 : 10000 },
+            (err) => res(!err));
+        });
 
-        if (tryPS(psCmd, false)) {
-          console.log(`[pkg-server] Firewall configured for port ${port}`);
-        } else if (tryPS(psCmd, true)) {
-          console.log(`[pkg-server] Firewall configured for port ${port} (via UAC)`);
-        } else {
-          console.warn(`[pkg-server] Could not configure firewall — PS4/PS5 may not reach port ${port}`);
-        }
+        // Fire and don't await — firewall configures in background while server is already listening
+        runPS(psCmd, false).then(ok => {
+          if (ok) { console.log(`[pkg-server] Firewall configured for port ${port}`); return; }
+          return runPS(psCmd, true).then(ok2 => {
+            if (ok2) console.log(`[pkg-server] Firewall configured for port ${port} (via UAC)`);
+            else console.warn(`[pkg-server] Could not configure firewall — PS4/PS5 may not reach port ${port}`);
+          });
+        }).catch(() => {});
       }
       resolve();
     });
@@ -1772,8 +2171,18 @@ async function pushEtaHen(ps4Ip, ps4Port, pkgUrl) {
 }
 
 // ── IPC: remote install ───────────────────────────────────────────────────────
-ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort) => {
-  const sender = event.sender;
+// remote-install: returns immediately with { ok: true, started: true }
+// All progress + completion communicated via install-progress events.
+// This prevents the renderer from blocking on a 5-minute invoke.
+ipcMain.handle('remote-install', (event, items, ps4Ip, ps4Port, serverPort, installDelay) => {
+  _runRemoteInstall(event.sender, items, ps4Ip, ps4Port, serverPort, installDelay).catch(e => {
+    event.sender.send('install-progress', { type: 'install-file-error', file: '', error: e.message });
+    event.sender.send('install-progress', { type: 'install-done', ok: 0, failed: 1, skipped: 0 });
+  });
+  return { ok: true, started: true };
+});
+
+async function _runRemoteInstall(sender, items, ps4Ip, ps4Port, serverPort, installDelay) {
   ps4Port    = parseInt(ps4Port)    || 12800;
   serverPort = parseInt(serverPort) || 9898;  // DPI default port
 
@@ -1828,8 +2237,18 @@ ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort
     for (let i = 0; i < localItems.length; i++) {
       const item = localItems[i];
 
+      // Inter-item delay: give the PS4 time to begin installing before sending next command
+      if (i > 0) {
+        const delayMs = (installDelay != null ? installDelay : 8000);
+        if (delayMs > 0) {
+          sender.send('install-progress', { type: 'install-task-progress', file: item.fileName,
+            taskId: null, percent: null, status: `Waiting ${delayMs/1000}s before next install…` });
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      }
+
       // Build URL in DPI format: http://PCIP:PORT/file/?b64=BASE64(localFilePath)
-      const b64    = item._b64key || Buffer.from(item.filePath).toString('base64');
+      const b64    = item._b64key || Buffer.from(item.filePath).toString('base64url');
       const pkgUrl = `http://${localIp}:${serverPort}/file/?b64=${b64}`;
 
       sender.send('install-progress', {
@@ -1955,21 +2374,19 @@ ipcMain.handle('remote-install', async (event, items, ps4Ip, ps4Port, serverPort
     setTimeout(() => {
       stopPkgServer();
       console.log('[pkg-server] stopped');
-      // Restore firewall DefaultInboundAction to Block
+      // Restore firewall — async so it never blocks anything
       if (process.platform === 'win32') {
-        try {
-          const { execSync } = require('child_process');
-          execSync(`powershell -NoProfile -NonInteractive -Command "Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block"`,
-            { windowsHide: true, timeout: 6000, stdio: 'pipe' });
-          console.log('[install] Firewall DefaultInboundAction restored to Block');
-        } catch (_) {}
+        const { exec } = require('child_process');
+        exec(`powershell -NoProfile -NonInteractive -Command "Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block"`,
+          { windowsHide: true, timeout: 8000 },
+          (err) => { if (!err) console.log('[install] Firewall DefaultInboundAction restored'); }
+        );
       }
     }, 300000);
   }
 
   sender.send('install-progress', { type: 'install-done', ...results });
-  return { ok: true, ...results };
-});
+}
 
 // ── IPC: stop file server ─────────────────────────────────────────────────────
 ipcMain.handle('stop-pkg-server', async () => { await stopPkgServer(); });
@@ -2256,13 +2673,14 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
 // Detects both PS4 and PS5 jailbreaks on the local subnet.
 // PS4: FTP on 2121, Remote PKG Installer on 12800
 // PS5: FTP on 2121, Remote PKG Installer on 12800, PS5-specific REST on 9090
-ipcMain.handle('discover-ps4', async (event) => {
+ipcMain.handle('discover-ps4', async (event, customSubnet) => {
   const sender = event.sender;
   const localIp = getLocalIp();
   const parts   = localIp.split('.');
-  if (parts.length !== 4) return { found: [], error: 'Cannot determine local subnet' };
+  if (!customSubnet && parts.length !== 4) return { found: [], error: 'Cannot determine local subnet' };
 
-  const subnet       = parts.slice(0, 3).join('.');
+  // customSubnet: e.g. "192.168.0" — overrides auto-detect
+  const subnet = customSubnet?.trim() || parts.slice(0, 3).join('.');
   const PROBE_PORTS  = [2121, 9090, 1337, 12800, 21];
   const CONFIRM_PORT = 12800;
   const TIMEOUT_MS   = 600;
