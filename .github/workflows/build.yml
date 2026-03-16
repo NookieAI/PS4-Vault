@@ -48,9 +48,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm install --no-package-lock
 
       - name: Build Mac
         run: npx electron-builder --mac --publish never
@@ -72,12 +72,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install Linux build deps
         run: sudo apt-get install -y rpm fakeroot
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm install --no-package-lock
 
       - name: Build Linux
         run: npx electron-builder --linux --publish never
