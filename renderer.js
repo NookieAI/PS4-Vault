@@ -865,7 +865,21 @@
     if(v==='exportTxt') exportTxt();  // Feature 20
     if(v==='settings')  openSettingsModal();
     if(v==='deleteDuplicates') deleteDuplicates(); // Feature 11
-    if(v==='checkUpdate'){pkgApi.checkForUpdates?.();toast('Checking for updates…');}
+    if(v==='checkUpdate'){
+      try {
+        toast('Checking for updates…');
+        const res = await pkgApi.checkForUpdatesManual?.();
+        if (!res) { toast('Could not reach update server', 'err'); return; }
+        if (res.upToDate) {
+          toast(`You're on the latest version (v${res.version})`);
+        } else {
+          showUpdateBanner(res);
+          toast(`Update available: v${res.latestVersion}`);
+        }
+      } catch (e) {
+        toast('Update check failed: ' + (e.message || String(e)), 'err');
+      }
+    }
     if(v==='openLog')    pkgApi.openLog();
     if(v==='openLogFolder') pkgApi.openLogFolder();
     if(v==='about')      openAboutModal();
@@ -1162,38 +1176,50 @@
   $('aboutModalBackdrop').addEventListener('click',e=>{if(e.target===$('aboutModalBackdrop'))closeAboutModal();});
 
   // ── Auto-updater banner ───────────────────────────────────────────────────────
-  (function(){
-    if (!pkgApi.onUpdateStatus) return;
-    const banner = $('updateBanner'), msg = $('updateMsg'), progress = $('updateProgress'),
-          btnDl = $('btnUpdateDownload'), btnInst = $('btnUpdateInstall'), btnDism = $('btnUpdateDismiss');
-    if (!banner) return;
+  let _pendingUpdateUrl = null;
+  function showUpdateBanner(info) {
+    const banner = $('updateBanner'), msg = $('updateMsg');
+    if (!banner || !msg) return;
+    _pendingUpdateUrl = info.downloadUrl;
+    msg.innerHTML = `<strong>PS4 Vault v${info.latestVersion} available</strong> — you have v${info.currentVersion}`;
+    $('btnUpdateDownload').style.display = 'inline-block';
+    $('btnUpdateInstall').style.display  = 'none';
+    $('updateProgress').textContent = '';
+    banner.classList.add('show');
+  }
 
-    pkgApi.onUpdateStatus(d => {
-      if (d.type === 'available') {
-        // Download starts automatically — just log it
-        console.log('[updater] Downloading v' + d.version + ' in background…');
-      } else if (d.type === 'downloading') {
-        // Show subtle progress in banner but don't force it open
-        msg.innerHTML = `<strong>Downloading update…</strong>`;
-        progress.textContent = `${d.percent}%  ${fmtSpeed(d.speed)}`;
-        btnDl.style.display = 'none';
-        banner.classList.add('show');
-      } else if (d.type === 'downloaded') {
-        // Update is ready — show restart prompt
-        msg.innerHTML = `<strong>Update ready — PS4 Vault v${d.version}</strong>  Restart to install.`;
-        progress.textContent = '';
-        btnDl.style.display = 'none';
-        btnInst.style.display = 'inline-block';
-        banner.classList.add('show');
-        toast('✅ Update downloaded — restart to install.');
-      } else if (d.type === 'error') {
-        console.warn('[updater]', d.message);
+  (function(){
+    if (!pkgApi.onUpdateAvailable) return;
+
+    pkgApi.onUpdateAvailable(showUpdateBanner);
+
+    if (pkgApi.onUpdateDownloadProgress) {
+      pkgApi.onUpdateDownloadProgress(({ pct, received, total }) => {
+        const msg = $('updateMsg'), progress = $('updateProgress');
+        if (msg) msg.innerHTML = '<strong>Downloading update…</strong>';
+        if (progress) progress.textContent = `${pct}%  (${(received/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB)`;
+        $('btnUpdateDownload').style.display = 'none';
+        $('updateBanner').classList.add('show');
+      });
+    }
+
+    const btnDl   = $('btnUpdateDownload');
+    const btnDism = $('btnUpdateDismiss');
+
+    if (btnDl) btnDl.addEventListener('click', async () => {
+      if (!_pendingUpdateUrl) return;
+      btnDl.disabled = true; btnDl.textContent = 'Downloading…';
+      try {
+        await pkgApi.downloadAndInstallUpdate(_pendingUpdateUrl);
+        const msg = $('updateMsg');
+        if (msg) msg.innerHTML = '<strong>Update downloaded — restarting…</strong>';
+      } catch (e) {
+        toast('Update failed: ' + (e.message || String(e)), 'err');
+        btnDl.disabled = false; btnDl.textContent = '⬇ Download Update';
       }
     });
 
-    if (btnDl)   btnDl.addEventListener('click',   () => pkgApi.downloadUpdate?.());
-    if (btnInst) btnInst.addEventListener('click',  () => pkgApi.installUpdate?.());
-    if (btnDism) btnDism.addEventListener('click',  () => banner.classList.remove('show'));
+    if (btnDism) btnDism.addEventListener('click', () => $('updateBanner').classList.remove('show'));
   })();
 
   // ── Inject runtime CSS ────────────────────────────────────────────────────────

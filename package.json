@@ -1,7 +1,7 @@
 {
   "name": "ps4-vault",
   "version": "1.0.3",
-  "description": "PS4 PKG library manager \u2014 scan, organise, rename and transfer .pkg files",
+  "description": "PS4 PKG library manager — scan, organise, rename and transfer .pkg files",
   "main": "main.js",
   "author": {
     "name": "Nookie",
@@ -15,8 +15,7 @@
     "build:all": "electron-builder --win --mac --linux"
   },
   "dependencies": {
-    "basic-ftp": "^5.0.5",
-    "electron-updater": "^6.1.7"
+    "basic-ftp": "^5.0.5"
   },
   "devDependencies": {
     "electron": "^29.0.0",
@@ -25,7 +24,7 @@
   "build": {
     "appId": "com.ps4vault.app",
     "productName": "PS4 Vault",
-    "copyright": "Copyright \u00a9 2026 PS4 Vault",
+    "copyright": "Copyright © 2026 PS4 Vault",
     "asar": true,
     "asarUnpack": [
       "assets/**/*"
@@ -39,18 +38,8 @@
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
       ],
       "icon": "assets/icon.ico",
       "artifactName": "${productName}-${version}-portable.exe"
@@ -82,12 +71,6 @@
     "directories": {
       "output": "dist",
       "buildResources": "assets"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "NookieAI",
-      "repo": "PS4-Vault",
-      "releaseType": "release"
     },
     "extraMetadata": {
       "main": "main.js"

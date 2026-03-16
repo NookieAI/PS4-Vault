@@ -80,6 +80,8 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     if (!ws || ws.maximized !== false) mainWindow.maximize();
     mainWindow.show();
+    // Silently check for updates 5s after window is shown
+    setTimeout(() => checkForUpdates(mainWindow), 5000);
   });
 
   // Save state on close/move/resize
@@ -123,76 +125,197 @@ app.on('child-process-gone', (_e, details) => {
   }
 });
 
-// ── Auto-updater (electron-updater + GitHub Releases) ────────────────────────
-// Silent auto-update: checks on startup, downloads in background, installs on quit.
-// Shows a one-time "restart to update" prompt in the renderer when ready.
-function initAutoUpdater() {
-  if (!app.isPackaged) {
-    console.log('[updater] Dev mode — skipped');
-    // Still register IPC handlers so menu "Check for updates" doesn't throw
-    ipcMain.handle('update-check',    () => ({ dev: true }));
-    ipcMain.handle('update-download', () => ({}));
-    ipcMain.handle('update-install',  () => ({}));
-    return;
-  }
+// ── Auto-updater (custom — mirrors PS5 Vault implementation) ─────────────────
+// No electron-updater dependency. Hits the GitHub releases API directly.
+// HOW IT WORKS:
+//   • On startup, quietly calls the GitHub releases API after window is shown
+//   • If a newer version exists, sends 'update-available' to the renderer
+//   • Renderer shows a banner; user clicks "Update Now"
+//   • Renderer calls 'download-and-install-update' with the download URL
+//   • main.js downloads the new .exe to %TEMP%, writes a tiny .bat that
+//     waits 2s, overwrites the running .exe and relaunches it
+//   • App calls app.quit() — the batch script takes over
+// ══════════════════════════════════════════════════════════════════════════════
+
+const GITHUB_REPO = 'NookieAI/PS4-Vault';
+
+function httpsGetJson(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('Too many redirects'));
+    const mod = url.startsWith('https') ? require('https') : require('http');
+    mod.get(url, {
+      headers: {
+        'User-Agent': `PS4-Vault/${VERSION}`,
+        'Accept':     'application/vnd.github+json'
+      }
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(httpsGetJson(res.headers.location, redirects + 1));
+      }
+      let raw = '';
+      res.on('data', c => { raw += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(raw)); }
+        catch (e) { reject(new Error('JSON parse error: ' + e.message)); }
+      });
+    }).on('error', reject);
+  });
+}
+
+function httpsDownloadFile(url, destPath, onProgress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 10) return reject(new Error('Too many redirects'));
+    const mod = url.startsWith('https') ? require('https') : require('http');
+    mod.get(url, { headers: { 'User-Agent': `PS4-Vault/${VERSION}` } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return resolve(httpsDownloadFile(res.headers.location, destPath, onProgress, redirects + 1));
+      }
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      const total  = parseInt(res.headers['content-length'] || '0', 10);
+      let received = 0;
+      const ws     = fs.createWriteStream(destPath);
+      res.on('data', chunk => {
+        received += chunk.length;
+        ws.write(chunk);
+        if (total > 0) onProgress?.(received, total);
+      });
+      res.on('end',   () => ws.end());
+      ws.on('finish', resolve);
+      ws.on('error',  reject);
+      res.on('error', (e) => { ws.destroy(); reject(e); });
+    }).on('error', reject);
+  });
+}
+
+function isNewerVersion(latest, current) {
+  const parse = v => String(v).replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  const [la, lb, lc] = parse(latest);
+  const [ca, cb, cc] = parse(current);
+  if (la !== ca) return la > ca;
+  if (lb !== cb) return lb > cb;
+  return lc > cc;
+}
+
+async function checkForUpdates(win) {
   try {
-    const { autoUpdater } = require('electron-updater');
+    const data = await httpsGetJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    if (!data || !data.tag_name) return;
 
-    // Fully silent — download happens in background, no prompts until ready
-    autoUpdater.autoDownload        = true;
-    autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.logger = {
-      info:  m => console.log('[updater]', m),
-      warn:  m => console.warn('[updater]', m),
-      error: m => console.error('[updater]', m),
-      debug: () => {},
-    };
-
-    function send(payload) {
-      try { mainWindow?.webContents?.send('update-status', payload); } catch (_) {}
+    const latest = data.tag_name.replace(/^v/i, '');
+    if (!isNewerVersion(latest, VERSION)) {
+      console.log(`[updater] Up to date (v${VERSION})`);
+      return;
     }
 
-    autoUpdater.on('checking-for-update',  ()     => console.log('[updater] Checking…'));
-    autoUpdater.on('update-not-available', ()     => console.log('[updater] Up to date'));
-    autoUpdater.on('update-available',     info   => {
-      console.log('[updater] Update available:', info.version);
-      send({ type: 'available', version: info.version });
-    });
-    autoUpdater.on('download-progress', p => {
-      console.log(`[updater] Downloading… ${Math.round(p.percent)}%`);
-      send({ type: 'downloading', percent: Math.round(p.percent), speed: p.bytesPerSecond, transferred: p.transferred, total: p.total });
-    });
-    autoUpdater.on('update-downloaded', info => {
-      console.log('[updater] Downloaded:', info.version, '— will install on quit');
-      send({ type: 'downloaded', version: info.version });
-    });
-    autoUpdater.on('error', e => {
-      console.error('[updater] Error:', e.message);
-      send({ type: 'error', message: e.message });
-    });
+    const assets = data.assets || [];
+    let platformAsset;
+    if (process.platform === 'darwin') {
+      platformAsset = assets.find(a => /\.dmg$/i.test(a.name));
+    } else if (process.platform === 'linux') {
+      platformAsset = assets.find(a => /\.AppImage$/i.test(a.name));
+    } else {
+      platformAsset = assets.find(a => /portable.*\.exe$/i.test(a.name))
+                   || assets.find(a => /\.exe$/i.test(a.name));
+    }
 
-    // Wait until window is shown before checking — avoids race with webContents
-    mainWindow?.once('show', () => {
-      setTimeout(() => {
-        autoUpdater.checkForUpdates().catch(e =>
-          console.warn('[updater] Check failed:', e.message)
-        );
-      }, 5000);
+    if (!platformAsset) {
+      console.warn(`[updater] No asset for platform "${process.platform}" in v${latest}`);
+      return;
+    }
+
+    console.log(`[updater] Update available: v${VERSION} → v${latest}`);
+    win.webContents.send('update-available', {
+      currentVersion: VERSION,
+      latestVersion:  latest,
+      downloadUrl:    platformAsset.browser_download_url,
+      releaseNotes:   data.body || '',
+      releaseName:    data.name || `v${latest}`
     });
-
-    // IPC handlers
-    ipcMain.handle('update-check',    () => autoUpdater.checkForUpdates().catch(e => ({ error: e.message })));
-    ipcMain.handle('update-download', () => autoUpdater.downloadUpdate().catch(e => ({ error: e.message })));
-    ipcMain.handle('update-install',  () => { autoUpdater.quitAndInstall(false, true); });
-
   } catch (e) {
-    console.warn('[updater] Not available:', e.message);
-    ipcMain.handle('update-check',    () => ({}));
-    ipcMain.handle('update-download', () => ({}));
-    ipcMain.handle('update-install',  () => ({}));
+    console.warn('[updater] Check failed:', e.message);
   }
 }
-initAutoUpdater();
+
+ipcMain.handle('download-and-install-update', async (event, downloadUrl) => {
+  const isWin   = process.platform === 'win32';
+  const isMac   = process.platform === 'darwin';
+  const fileExt = isWin ? '.exe' : isMac ? '.dmg' : '.AppImage';
+  const tmpFile = path.join(os.tmpdir(), `ps4vault-update${fileExt}`);
+  const currentExe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+
+  try {
+    await httpsDownloadFile(downloadUrl, tmpFile, (received, total) => {
+      const pct = Math.round((received / total) * 100);
+      event.sender.send('update-download-progress', { pct, received, total });
+    });
+
+    if (isWin) {
+      const tmpBat = path.join(os.tmpdir(), 'ps4vault-updater.bat');
+      const bat = [
+        '@echo off',
+        'timeout /t 2 /nobreak >nul',
+        ':retry',
+        `copy /y "${tmpFile}" "${currentExe}" >nul 2>&1`,
+        'if errorlevel 1 (',
+        '  timeout /t 1 /nobreak >nul',
+        '  goto retry',
+        ')',
+        `start "" "${currentExe}"`,
+        `del "${tmpFile}"`,
+        'del "%~f0"',
+      ].join('\r\n');
+      fs.writeFileSync(tmpBat, bat, 'utf8');
+      const { spawn } = require('child_process');
+      const child = spawn('cmd.exe', ['/c', tmpBat], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.unref();
+    } else if (isMac) {
+      const { spawn } = require('child_process');
+      spawn('open', [tmpFile], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      fs.chmodSync(tmpFile, 0o755);
+      const { spawn } = require('child_process');
+      spawn('xdg-open', [path.dirname(tmpFile)], { detached: true, stdio: 'ignore' }).unref();
+    }
+
+    setTimeout(() => app.quit(), 600);
+    return { ok: true };
+  } catch (e) {
+    console.error('[updater] Download/install failed:', e.message);
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+    throw new Error('Update failed: ' + e.message);
+  }
+});
+
+ipcMain.handle('check-for-updates-manual', async () => {
+  try {
+    const data = await httpsGetJson(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    if (!data || !data.tag_name) return null;
+    const latest = data.tag_name.replace(/^v/i, '');
+    if (!isNewerVersion(latest, VERSION)) return { upToDate: true, version: VERSION };
+    const assets = data.assets || [];
+    let platformAsset;
+    if (process.platform === 'darwin') {
+      platformAsset = assets.find(a => /\.dmg$/i.test(a.name));
+    } else if (process.platform === 'linux') {
+      platformAsset = assets.find(a => /\.AppImage$/i.test(a.name));
+    } else {
+      platformAsset = assets.find(a => /portable.*\.exe$/i.test(a.name))
+                   || assets.find(a => /\.exe$/i.test(a.name));
+    }
+    return {
+      upToDate:       false,
+      currentVersion: VERSION,
+      latestVersion:  latest,
+      downloadUrl:    platformAsset?.browser_download_url || null,
+      releaseName:    data.name || `v${latest}`,
+      releaseNotes:   data.body || ''
+    };
+  } catch (e) {
+    throw new Error('Update check failed: ' + e.message);
+  }
+});
+
+// Trigger silent check 5s after window is shown
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
