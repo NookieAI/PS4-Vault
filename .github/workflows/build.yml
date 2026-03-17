@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.0.4)'
+        description: 'Release tag (e.g. v1.0.6)'
         required: true
 
 permissions:
@@ -49,11 +49,43 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm install --no-package-lock
+      - name: Download Inter font
+        run: |
+          New-Item -ItemType Directory -Force -Path assets/fonts | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -OutFile inter.zip
+          Expand-Archive -Path inter.zip -DestinationPath inter-tmp -Force
+          $woff2 = Get-ChildItem -Path inter-tmp -Recurse -Filter "Inter.woff2" | Select-Object -First 1
+          if (-not $woff2) { $woff2 = Get-ChildItem -Path inter-tmp -Recurse -Filter "*.woff2" | Where-Object { $_.Name -notlike "*Italic*" } | Select-Object -First 1 }
+          Copy-Item $woff2.FullName -Destination assets/fonts/inter.woff2
+          Remove-Item inter.zip, inter-tmp -Recurse -Force
+          Write-Host "Inter font bundled: $(Get-Item assets/fonts/inter.woff2)"
+        shell: pwsh
+
+      - run: npm ci
 
       - name: Build Windows portable
         run: npx electron-builder --win portable --publish never
+
+      - name: Sign exe (self-signed — removes Unknown Publisher, reduces SmartScreen)
+        run: |
+          $cert = New-SelfSignedCertificate `
+            -Subject "CN=PS4 Vault, O=NookieAI, C=US" `
+            -Type CodeSigning `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -HashAlgorithm SHA256 `
+            -NotAfter (Get-Date).AddYears(3)
+          $pwd = ConvertTo-SecureString -String "ps4vault_sign" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath sign.pfx -Password $pwd | Out-Null
+          $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          & "C:\Program Files (x86)\Windows Kitsin.0.22621.0d\signtool.exe" sign `
+            /fd SHA256 /p7co 1.2.840.113549.1.9.16.1.4 /p7 . `
+            /f sign.pfx /p ps4vault_sign `
+            /t http://timestamp.digicert.com `
+            $exe.FullName 2>&1 | Write-Host
+          Remove-Item sign.pfx -Force
+          Write-Host "Signed: $($exe.Name)"
+        shell: pwsh
+        continue-on-error: true
 
       - name: Rename to PS4 Vault.exe
         run: |
@@ -79,21 +111,20 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm install --no-package-lock
-
-      - name: Generate icns from ico
+      - name: Download Inter font
         run: |
-          mkdir -p build/icons.iconset
-          sips -z 16 16     assets/icon.ico --out build/icons.iconset/icon_16x16.png     2>/dev/null || true
-          sips -z 32 32     assets/icon.ico --out build/icons.iconset/icon_16x16@2x.png  2>/dev/null || true
-          sips -z 32 32     assets/icon.ico --out build/icons.iconset/icon_32x32.png     2>/dev/null || true
-          sips -z 64 64     assets/icon.ico --out build/icons.iconset/icon_32x32@2x.png  2>/dev/null || true
-          sips -z 128 128   assets/icon.ico --out build/icons.iconset/icon_128x128.png   2>/dev/null || true
-          sips -z 256 256   assets/icon.ico --out build/icons.iconset/icon_128x128@2x.png 2>/dev/null || true
-          sips -z 256 256   assets/icon.ico --out build/icons.iconset/icon_256x256.png   2>/dev/null || true
-          sips -z 512 512   assets/icon.ico --out build/icons.iconset/icon_256x256@2x.png 2>/dev/null || true
-          iconutil -c icns build/icons.iconset -o build/icon.icns || true
+          mkdir -p assets/fonts
+          curl -L "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o inter.zip
+          unzip -o inter.zip -d inter-tmp
+          woff2=$(find inter-tmp -name "Inter.woff2" | head -1)
+          if [ -z "$woff2" ]; then
+            woff2=$(find inter-tmp -name "*.woff2" | grep -iv italic | head -1)
+          fi
+          cp "$woff2" assets/fonts/inter.woff2
+          rm -rf inter.zip inter-tmp
+          echo "Inter font bundled: $(ls -lh assets/fonts/inter.woff2)"
+
+      - run: npm ci
 
       - name: Build Mac
         run: npx electron-builder --mac --publish never
@@ -122,8 +153,20 @@ jobs:
       - name: Remove ico so electron-builder uses icon.png
         run: rm -f assets/icon.ico assets/icon.icns
 
-      - name: Install dependencies
-        run: npm install --no-package-lock
+      - name: Download Inter font
+        run: |
+          mkdir -p assets/fonts
+          curl -L "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o inter.zip
+          unzip -o inter.zip -d inter-tmp
+          woff2=$(find inter-tmp -name "Inter.woff2" | head -1)
+          if [ -z "$woff2" ]; then
+            woff2=$(find inter-tmp -name "*.woff2" | grep -iv italic | head -1)
+          fi
+          cp "$woff2" assets/fonts/inter.woff2
+          rm -rf inter.zip inter-tmp
+          echo "Inter font bundled: $(ls -lh assets/fonts/inter.woff2)"
+
+      - run: npm ci
 
       - name: Build Linux
         run: npx electron-builder --linux --publish never
