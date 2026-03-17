@@ -175,3 +175,4 @@ jobs:
         with:
           tag_name: ${{ needs.create-release.outputs.tag }}
           files: dist/**/*.AppImage
+        
