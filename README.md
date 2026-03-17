@@ -1,3 +1,6 @@
+<img width="1920" height="1020" alt="image" src="https://github.com/user-attachments/assets/85306120-15b1-47ef-aff7-7d120b09347a" />
+
+
 <p align="center">
   <img src="assets/logo.jpg" width="100" alt="PS4 Vault" style="border-radius:12px"/>
 </p>
