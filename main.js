@@ -32,7 +32,7 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.4';
+const VERSION        = '1.0.6';
 // initLog() called after app.whenReady — see below
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -115,6 +115,24 @@ function createWindow() {
     console.log('[main] PS4 Vault v' + VERSION);
     mainWindow.webContents.send('app-version', VERSION);
   });
+}
+
+// ── Single instance lock (packaged builds only) ───────────────────────────────
+// In dev mode multiple instances are allowed for testing.
+// In production, if a second instance is launched it quits immediately
+// and focuses the existing window instead.
+if (app.isPackaged) {
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+  } else {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+    });
+  }
 }
 
 app.whenReady().then(() => { initLog(); createWindow(); });
@@ -1655,7 +1673,6 @@ function getLocalIp() {
 }
 
 // ── IPC: misc helpers ────────────────────────────────────────────────────────
-ipcMain.handle('get-app-path', () => app.isPackaged ? process.resourcesPath : __dirname);
 
 // Read logo from extraResources (resources/assets/) in packaged build, or project assets/ in dev.
 // Returns a base64 data URL so the renderer never has to construct a file path.
@@ -2570,7 +2587,6 @@ async function _runRemoteInstall(sender, items, ps4Ip, ps4Port, serverPort, inst
 }
 
 // ── IPC: stop file server ─────────────────────────────────────────────────────
-ipcMain.handle('stop-pkg-server', async () => { await stopPkgServer(); });
 
 // ── IPC: scan installed games on console via FTP ──────────────────────────────
 // Reads param.sfo + icon0.png directly from /user/app/CUSAXXXXX/ on the console.
@@ -2627,37 +2643,67 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
       return total;
     }
 
-    // Helper: download a remote file into a Buffer using a fresh FTP connection.
-    // Using a fresh client per file avoids the state-corruption that occurs when
-    // a previous download fails or is interrupted (e.g. file-not-found aborts
-    // the data channel, leaving the shared client in a broken state).
-    async function ftpDownloadBuf(remotePath, maxBytes) {
-      const dlClient = await makeFtpClient(cfg);
+    // Helper: download a remote file into a Buffer.
+    // Uses a shared persistent client passed in, so we don't open a new TCP
+    // connection for every icon candidate. The caller passes iconClient.
+    // Falls back to a fresh connection only if the shared one is broken.
+    // clientHolder: { client } — object so callers can see the client get replaced.
+    // After a failed download, basic-ftp leaves the client in a broken state.
+    // We close it and reconnect so the next candidate path gets a fresh session.
+    async function ftpDownloadBuf(remotePath, maxBytes, clientHolder) {
+      if (!clientHolder || !clientHolder.client) {
+        // No shared client — use a fresh one (owned, closed after use)
+        const owned = await makeFtpClient(cfg);
+        try {
+          const chunks = [];
+          let received = 0;
+          const { Writable } = require('stream');
+          const w = new Writable({
+            write(chunk, _e, cb) {
+              if (received < maxBytes) chunks.push(chunk.slice(0, Math.min(chunk.length, maxBytes - received)));
+              received += chunk.length; cb();
+            }
+          });
+          await owned.downloadTo(w, remotePath);
+          return Buffer.concat(chunks);
+        } finally { try { owned.close(); } catch (_) {} }
+      }
+
+      // Shared client path — reconnect after any failure so next call is clean
       try {
         const chunks = [];
-        let   received = 0;
+        let received = 0;
         const { Writable } = require('stream');
         const w = new Writable({
           write(chunk, _e, cb) {
-            // Buffer up to maxBytes but do NOT destroy — stream.destroy() aborts
-            // the FTP data channel and corrupts the client for subsequent calls.
-            if (received < maxBytes) {
-              chunks.push(chunk.slice(0, Math.min(chunk.length, maxBytes - received)));
-            }
-            received += chunk.length;
-            cb();
+            if (received < maxBytes) chunks.push(chunk.slice(0, Math.min(chunk.length, maxBytes - received)));
+            received += chunk.length; cb();
           }
         });
-        await dlClient.downloadTo(w, remotePath);
+        await clientHolder.client.downloadTo(w, remotePath);
         return Buffer.concat(chunks);
-      } finally {
-        try { dlClient.close(); } catch (_) {}
+      } catch (err) {
+        // Client is now in unknown state after failed transfer — close and reconnect
+        try { clientHolder.client.close(); } catch (_) {}
+        clientHolder.client = null;
+        try { clientHolder.client = await makeFtpClient(cfg); } catch (_) {}
+        throw err; // re-throw so caller's try/catch logs the miss correctly
       }
     }
 
     for (const dir of appDirs) {
       const _done = done; // capture before async gap
       sender.send('scan-progress', { type: 'scan-parsing', file: dir.name, done: _done, total: appDirs.length });
+      // One persistent FTP connection per game — reused for all SFO and icon attempts.
+      // Avoids opening 7+ connections per game when paths are missing.
+      // clientHolder.client is replaced on each failed download so the next
+      // candidate path always gets a live FTP session.
+      const clientHolder = { client: null };
+      try {
+        clientHolder.client = await makeFtpClient(cfg);
+      } catch (e) {
+        console.warn(`[installed-scan] ${dir.name} could not open icon client: ${e.message}`);
+      }
       try {
         const titleId = dir.name.replace(/[^A-Z0-9]/gi, '').substring(0, 9);
         // Known PS4/PS5 jailbreak FTP path layouts for param.sfo:
@@ -2690,7 +2736,7 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
 
         // Try each candidate base and dynamically verify param.sfo exists
         const tryDownloadSfo = async (p) => {
-          const buf = await ftpDownloadBuf(p, 256 * 1024);
+          const buf = await ftpDownloadBuf(p, 256 * 1024, clientHolder);
           if (buf.length < 20) throw new Error('too short');
           const parsed = parseSfo(buf);
           if (!parsed.TITLE && !parsed.TITLE_ID && !parsed.APP_VER && !parsed.CATEGORY)
@@ -2724,43 +2770,25 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
           console.warn(`[installed-scan] No SFO found for ${dir.name} — tried ${candidateDirs.length} paths`);
         }
 
-        // Icon candidates — the icon lives ALONGSIDE param.sfo in the same dir,
-        // NOT in a sce_sys/ subdirectory when under appmeta.
-        // Icon is ALWAYS in the game's app dir (/user/app/CUSAXXXXX/sce_sys/icon0.png)
-        // regardless of where param.sfo was found.
-        // appmeta has SFO but NO icon. Game dir has both.
-        const iconCandidates = [
-          `${appBase}/${dir.name}/sce_sys/icon0.png`,          // standard — try first always
+        // Merged, deduplicated icon candidate list — most reliable paths first.
+        // iconCandidates (game app dir) was previously built but never iterated — fixed.
+        // /user/app/CUSAXXXXX/sce_sys/icon0.png is correct for ~95% of PS4 installs.
+        const allIconCandidates = [
+          `${appBase}/${dir.name}/sce_sys/icon0.png`,          // standard PS4 — most common
+          `/user/appmeta/${dir.name}/icon0.png`,               // user appmeta
           `${appBase}/${dir.name}/app/sce_sys/icon0.png`,      // subdir variant
           `/mnt/sandbox/${dir.name}_000/sce_sys/icon0.png`,    // sandbox mount
-          ...(foundSceDir && foundSceDir !== `${appBase}/${dir.name}` ? [
+          ...(foundSceDir ? [
             `${foundSceDir}/sce_sys/icon0.png`,
             `${foundSceDir}/icon0.png`,
           ] : []),
+          `/system_data/priv/appmeta/${dir.name}/icon0.png`,   // system appmeta
           `${appBase}/${dir.name}/sce_sys/icon0.dds`,          // DDS fallback
-          `/system_data/priv/appmeta/${dir.name}/icon0.png`,   // appmeta (unlikely but try)
         ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
 
-        // Known PS4/PS5 icon paths (ordered by likelihood):
-        // /user/appmeta/CUSAXXXXX/icon0.png  ← primary user-space appmeta
-        // /system_data/priv/appmeta/CUSAXXXXX/icon0.png ← system appmeta (same dir as SFO)
-        // /user/app/CUSAXXXXX/sce_sys/icon0.png ← game data dir
-        const iconCandidates2 = [
-          `/user/appmeta/${dir.name}/icon0.png`,
-          ...(foundSceDir ? [
-            `${foundSceDir}/icon0.png`,
-            `${foundSceDir}/sce_sys/icon0.png`,
-          ] : []),
-          `/system_data/priv/appmeta/${dir.name}/icon0.png`,
-          `${appBase}/${dir.name}/sce_sys/icon0.png`,
-          `${appBase}/${dir.name}/sce_sys/icon0.dds`,
-          `${appBase}/${dir.name}/app/sce_sys/icon0.png`,
-          `/mnt/sandbox/${dir.name}_000/sce_sys/icon0.png`,
-        ].filter((v, i, a) => a.indexOf(v) === i);
-
-        for (const iconPath of iconCandidates2) {
+        for (const iconPath of allIconCandidates) {
           try {
-            const buf = await ftpDownloadBuf(iconPath, MAX_ICON);
+            const buf = await ftpDownloadBuf(iconPath, MAX_ICON, clientHolder);
             if (buf.length > 8) {
               const isPng  = buf[0] === 0x89 && buf[1] === 0x50;
               const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8;
@@ -2776,7 +2804,7 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
             console.warn(`[installed-scan] ${dir.name} icon miss: ${iconPath} — ${e.message}`);
           }
         }
-        if (!iconDataUrl) console.warn(`[installed-scan] ${dir.name} NO ICON in any of ${iconCandidates2.length} paths`);
+        if (!iconDataUrl) console.warn(`[installed-scan] ${dir.name} NO ICON found after trying ${allIconCandidates.length} paths`);
 
         // Multi-language title fallback chain
         const sfoTitle = sfoData.TITLE    || sfoData.TITLE_00 || sfoData.TITLE_01 ||
@@ -2835,6 +2863,8 @@ ipcMain.handle('ftp-scan-installed', async (event, cfg) => {
 
       } catch (e) {
         console.warn('[installed-scan] skip', dir.name, e.message);
+      } finally {
+        try { clientHolder.client?.close(); } catch (_) {}
       }
       done++;
     }
