@@ -50,6 +50,7 @@ jobs:
           node-version: 20
 
       - name: Download Inter font
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path assets/fonts | Out-Null
           Invoke-WebRequest -Uri "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -OutFile inter.zip
@@ -58,15 +59,16 @@ jobs:
           if (-not $woff2) { $woff2 = Get-ChildItem -Path inter-tmp -Recurse -Filter "*.woff2" | Where-Object { $_.Name -notlike "*Italic*" } | Select-Object -First 1 }
           Copy-Item $woff2.FullName -Destination assets/fonts/inter.woff2
           Remove-Item inter.zip, inter-tmp -Recurse -Force
-          Write-Host "Inter font bundled: $(Get-Item assets/fonts/inter.woff2)"
-        shell: pwsh
+          Write-Host "Inter font bundled"
 
       - run: npm ci
 
       - name: Build Windows portable
         run: npx electron-builder --win portable --publish never
 
-      - name: Sign exe (self-signed — removes Unknown Publisher, reduces SmartScreen)
+      - name: Sign exe (self-signed)
+        shell: pwsh
+        continue-on-error: true
         run: |
           $cert = New-SelfSignedCertificate `
             -Subject "CN=PS4 Vault, O=NookieAI, C=US" `
@@ -77,21 +79,20 @@ jobs:
           $pwd = ConvertTo-SecureString -String "ps4vault_sign" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath sign.pfx -Password $pwd | Out-Null
           $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
-          & "C:\Program Files (x86)\Windows Kitsin.0.22621.0d\signtool.exe" sign `
-            /fd SHA256 /p7co 1.2.840.113549.1.9.16.1.4 /p7 . `
-            /f sign.pfx /p ps4vault_sign `
-            /t http://timestamp.digicert.com `
-            $exe.FullName 2>&1 | Write-Host
-          Remove-Item sign.pfx -Force
-          Write-Host "Signed: $($exe.Name)"
-        shell: pwsh
-        continue-on-error: true
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits" -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($signtool) {
+            & $signtool.FullName sign /fd SHA256 /f sign.pfx /p ps4vault_sign /t http://timestamp.digicert.com $exe.FullName
+            Write-Host "Signed: $($exe.Name)"
+          } else {
+            Write-Host "signtool not found - skipping signing"
+          }
+          Remove-Item sign.pfx -Force -ErrorAction SilentlyContinue
 
       - name: Rename to PS4 Vault.exe
+        shell: pwsh
         run: |
           $file = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
           Rename-Item $file.FullName "PS4 Vault.exe"
-        shell: pwsh
 
       - name: Upload Windows portable
         uses: softprops/action-gh-release@v2
@@ -122,7 +123,6 @@ jobs:
           fi
           cp "$woff2" assets/fonts/inter.woff2
           rm -rf inter.zip inter-tmp
-          echo "Inter font bundled: $(ls -lh assets/fonts/inter.woff2)"
 
       - run: npm ci
 
@@ -164,7 +164,6 @@ jobs:
           fi
           cp "$woff2" assets/fonts/inter.woff2
           rm -rf inter.zip inter-tmp
-          echo "Inter font bundled: $(ls -lh assets/fonts/inter.woff2)"
 
       - run: npm ci
 
