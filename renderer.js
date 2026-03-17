@@ -45,17 +45,19 @@
   }
 
   // ── Logo ──────────────────────────────────────────────────────────────────────
-  // In packaged builds, assets live in extraResources (resources/assets/) outside
-  // the asar. Main process reads the file and returns a base64 data URL so the
-  // renderer never has to resolve any filesystem path.
   (async () => {
     try {
       const dataUrl = await pkgApi.getLogoDataUrl();
       if (dataUrl) {
         const brand = $('brandLogo');
-        if (brand) brand.src = dataUrl;
+        if (brand) {
+          brand.src = dataUrl;
+          brand.style.display = 'block'; // restore if onerror hid it
+          const fallback = $('brandFallback');
+          if (fallback) fallback.style.display = 'none';
+        }
         const about = $('aboutLogo');
-        if (about) about.src = dataUrl;
+        if (about) { about.src = dataUrl; about.style.display = ''; }
       }
     } catch (_) {}
   })();
@@ -63,8 +65,26 @@
   // ── Theme ─────────────────────────────────────────────────────────────────────
   function applyTheme(t) { document.body.dataset.theme = t; saveSetting('theme', t); }
   applyTheme(settings.theme || 'dark');
+  // Shake the modal when user clicks the backdrop — visual cue that it won't close
+  window.shakeModal = (backdrop) => {
+    const modal = backdrop.querySelector('.modal');
+    if (!modal) return;
+    modal.classList.remove('modal-shake');
+    // Force reflow so re-adding the class restarts the animation
+    void modal.offsetWidth;
+    modal.classList.add('modal-shake');
+    modal.addEventListener('animationend', () => modal.classList.remove('modal-shake'), { once: true });
+  };
   $('madeBy').addEventListener('click', () =>
     applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark'));
+
+  // ── Version ───────────────────────────────────────────────────────────────────
+  pkgApi.onAppVersion?.(v => {
+    const sub = $('appVersionSub');
+    if (sub) sub.textContent = 'v' + v;
+    const aboutVer = $('aboutVersion');
+    if (aboutVer) aboutVer.textContent = 'v' + v + ' · Made by Nookie';
+  });
 
   // ── Recents ───────────────────────────────────────────────────────────────────
   function getRecent(k) { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch { return []; } }
@@ -78,7 +98,7 @@
     const inp = $(iid);
     container.innerHTML = getRecent(sk).map(v => {
       const short = v.length > 36 ? '…' + v.slice(-34) : v;
-      return `<button class="recent-chip" title="${escHtml(v)}" data-val="${escHtml(v)}"><span class="chip-icon">🕐</span>${escHtml(short)}</button>`;
+      return `<button class="recent-chip" title="${escHtml(v)}" data-val="${escHtml(v)}">${escHtml(short)}</button>`;
     }).join('');
     container.querySelectorAll('.recent-chip').forEach(btn =>
       btn.addEventListener('click', () => { if (inp) { inp.value = btn.dataset.val; inp.dispatchEvent(new Event('input')); } }));
@@ -106,16 +126,27 @@
   function refreshConsoleProfiles() {
     const sel = $('csProfiles'); if (!sel) return;
     const profiles = getProfiles();
-    sel.innerHTML = '<option value="">Profiles…</option>' +
+    sel.innerHTML = '<option value="">Saved consoles…</option>' +
       profiles.map((p, i) => `<option value="${i}">${escHtml(p.name)}</option>`).join('');
   }
-  $('btnCsSaveProfile')?.addEventListener('click', () => {
-    const host = $('csHost')?.value.trim(); if (!host) { return; }
-    const name = prompt(`Save profile name for ${host}:`, host);
+  $('btnCsSaveProfile')?.addEventListener('click', async () => {
+    const host = $('csHost')?.value.trim(); if (!host) { toast('Enter a console IP first.', 'err'); return; }
+    // Use showConfirm-style inline input — prompt() is blocked in Electron contextIsolation mode
+    const defaultName = host;
+    const name = await showInputDialog('Save Console Profile', `Profile name for ${host}:`, defaultName);
     if (!name) return;
-    const profiles = getProfiles().filter(p => p.host !== host);
-    profiles.unshift({ name, host, port: $('csFtpPort')?.value || '2121', user: $('csUser')?.value || 'anonymous', path: $('csPkgPath')?.value || '/' });
-    saveProfiles(profiles.slice(0, 10));
+    // Deduplicate by name (not host) — allows multiple profiles per IP with different paths
+    const profiles = getProfiles().filter(p => p.name !== name);
+    profiles.unshift({
+      name,
+      host,
+      port:    $('csFtpPort')?.value    || '2121',
+      user:    $('csUser')?.value       || 'anonymous',
+      pass:    $('csPass')?.value       || '',
+      path:    $('csPkgPath')?.value    || '/',
+      ftpMode: $('csFtpMode')?.value    || 'passive',
+    });
+    saveProfiles(profiles.slice(0, 20));
     refreshConsoleProfiles();
     toast(`Saved profile "${name}"`);
   });
@@ -123,11 +154,14 @@
     const idx = parseInt(e.target.value);
     if (isNaN(idx)) return;
     const p = getProfiles()[idx]; if (!p) return;
-    if ($('csHost')) $('csHost').value = p.host;
-    if ($('csFtpPort')) $('csFtpPort').value = p.port || '2121';
-    if ($('csUser')) $('csUser').value = p.user || 'anonymous';
-    if ($('csPkgPath')) $('csPkgPath').value = p.path || '/';
+    if ($('csHost'))    $('csHost').value    = p.host    || '';
+    if ($('csFtpPort')) $('csFtpPort').value = p.port    || '2121';
+    if ($('csUser'))    $('csUser').value    = p.user    || 'anonymous';
+    if ($('csPass'))    $('csPass').value    = p.pass    || '';
+    if ($('csPkgPath')) $('csPkgPath').value = p.path    || '/';
+    if ($('csFtpMode')) $('csFtpMode').value = p.ftpMode || 'passive';
     e.target.value = '';
+    toast(`Loaded profile "${p.name}"`);
   });
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -223,13 +257,13 @@
 
   // ── Placeholder SVGs ──────────────────────────────────────────────────────────
   function makeInstalledPlaceholderSvg() {
-    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(34,197,94,0.08)"/><rect x="18" y="18" width="36" height="4" rx="2" fill="rgba(34,197,94,0.3)"/><rect x="18" y="27" width="28" height="3" rx="1.5" fill="rgba(34,197,94,0.18)"/><rect x="18" y="34" width="32" height="3" rx="1.5" fill="rgba(34,197,94,0.14)"/><rect x="18" y="41" width="20" height="3" rx="1.5" fill="rgba(34,197,94,0.1)"/><text x="36" y="62" text-anchor="middle" font-size="8" fill="rgba(34,197,94,0.5)" font-family="JetBrains Mono,ui-monospace,monospace" font-weight="700">ON CONSOLE</text></svg>`;
+    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(34,197,94,0.08)"/><rect x="18" y="18" width="36" height="4" rx="2" fill="rgba(34,197,94,0.3)"/><rect x="18" y="27" width="28" height="3" rx="1.5" fill="rgba(34,197,94,0.18)"/><rect x="18" y="34" width="32" height="3" rx="1.5" fill="rgba(34,197,94,0.14)"/><rect x="18" y="41" width="20" height="3" rx="1.5" fill="rgba(34,197,94,0.1)"/><text x="36" y="62" text-anchor="middle" font-size="8" fill="rgba(34,197,94,0.5)" font-family="Inter,sans-serif" font-weight="700">ON CONSOLE</text></svg>`;
   }
   function makePartialPlaceholderSvg() {
-    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(251,146,60,0.08)"/><rect x="14" y="20" width="44" height="5" rx="2.5" fill="rgba(251,146,60,0.25)"/><rect x="14" y="30" width="28" height="4" rx="2" fill="rgba(251,146,60,0.15)"/><rect x="14" y="38" width="20" height="4" rx="2" fill="rgba(251,146,60,0.1)"/><text x="36" y="58" text-anchor="middle" font-size="8" fill="rgba(251,146,60,0.7)" font-family="JetBrains Mono,ui-monospace,monospace" font-weight="700">PARTIAL</text><text x="36" y="67" text-anchor="middle" font-size="7" fill="rgba(251,146,60,0.4)" font-family="JetBrains Mono,ui-monospace,monospace">.pkg.part</text></svg>`;
+    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(251,146,60,0.08)"/><rect x="14" y="20" width="44" height="5" rx="2.5" fill="rgba(251,146,60,0.25)"/><rect x="14" y="30" width="28" height="4" rx="2" fill="rgba(251,146,60,0.15)"/><rect x="14" y="38" width="20" height="4" rx="2" fill="rgba(251,146,60,0.1)"/><text x="36" y="58" text-anchor="middle" font-size="8" fill="rgba(251,146,60,0.7)" font-family="Inter,sans-serif" font-weight="700">PARTIAL</text><text x="36" y="67" text-anchor="middle" font-size="7" fill="rgba(251,146,60,0.4)" font-family="Inter,sans-serif">.pkg.part</text></svg>`;
   }
   function makePlaceholderSvg() {
-    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(255,255,255,0.03)"/><rect x="14" y="18" width="44" height="5" rx="2.5" fill="rgba(255,255,255,0.1)"/><rect x="14" y="28" width="32" height="4" rx="2" fill="rgba(255,255,255,0.06)"/><rect x="14" y="36" width="38" height="4" rx="2" fill="rgba(255,255,255,0.06)"/><rect x="14" y="44" width="24" height="4" rx="2" fill="rgba(255,255,255,0.04)"/><text x="36" y="64" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.16)" font-family="JetBrains Mono,ui-monospace,monospace" font-weight="600" letter-spacing="1">PKG</text></svg>`;
+    return `<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="72" height="72" rx="8" fill="rgba(255,255,255,0.03)"/><rect x="14" y="18" width="44" height="5" rx="2.5" fill="rgba(255,255,255,0.1)"/><rect x="14" y="28" width="32" height="4" rx="2" fill="rgba(255,255,255,0.06)"/><rect x="14" y="36" width="38" height="4" rx="2" fill="rgba(255,255,255,0.06)"/><rect x="14" y="44" width="24" height="4" rx="2" fill="rgba(255,255,255,0.04)"/><text x="36" y="64" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.16)" font-family="Inter,sans-serif" font-weight="600" letter-spacing="1">PKG</text></svg>`;
   }
 
   // ── Row HTML builder ──────────────────────────────────────────────────────────
@@ -251,16 +285,12 @@
     else if (item.titleId)   { displayName=escHtml(item.titleId);  titleQuality='title-fallback'; }
     else                     { displayName=escHtml(item.fileName||'—'); titleQuality='title-fallback'; }
     const cusaLine  = item.titleId ? `<div class="title-cusa">${escHtml(item.titleId)}</div>` : '';
-    const pathLine  = item.dirPath ? `<div class="title-path" title="${escHtml(item.filePath)}">${escHtml(item.dirPath)}</div>` : '';
+    const pathLine  = ''; // removed - path accessible via folder button
     const dupBadge  = item.isDuplicate ? ' <span class="dup-badge">DUP</span>' : '';
     const ftpBadge  = item.isFtp&&!item.isInstalled ? ' <span class="ftp-badge">FTP</span>' : '';
     const instBadge = item.isInstalled ? ' <span class="installed-badge">INSTALLED</span>' : '';
     const partBadge = isPartial ? ' <span class="partial-badge" title="Incomplete download — .pkg.part file">⚠ PARTIAL</span>' : '';
-    const actionsHtml = item.isInstalled
-      ? `<button class="row-btn row-btn--install" title="Install" onclick="installOne('${escJs(item.filePath)}')">📡</button>`
-      : isPartial
-      ? `<button class="row-btn" title="Show in folder" onclick="pkgApi.showInFolder('${escJs(item.filePath)}')">📂</button><button class="row-btn row-btn--danger" title="Delete partial" onclick="deleteOne('${escJs(item.filePath)}')">🗑</button>`
-      : `<button class="row-btn" title="Show in folder" onclick="pkgApi.showInFolder('${escJs(item.filePath)}')">📂</button><button class="row-btn" title="Copy filename" onclick="pkgApi.copyToClipboard('${escJs(item.fileName)}')">📋</button><button class="row-btn row-btn--install" title="Install" onclick="installOne('${escJs(item.filePath)}')">📡</button><button class="row-btn row-btn--danger" title="Delete" onclick="deleteOne('${escJs(item.filePath)}')">🗑</button>`;
+    const actionsHtml = `<button class=\"row-btn\" title=\"Show in folder\" onclick=\"pkgApi.showInFolder('${escJs(item.filePath)}')\"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>`;
     const sizeDisp = (item.isInstalled && !item.fileSize)
       ? '<span style="color:var(--muted);font-size:11px">on console</span>'
       : isPartial
@@ -361,7 +391,7 @@
           <div class="gc-sub">${escHtml(item.titleId||'—')}</div>
           <div class="gc-badge-row">
             <span class="cat-badge ${catCls}" style="font-size:9.5px;padding:1px 5px">${categoryDisplay(item.category)}</span>
-            ${item.appVer?`<span style="font-size:9.5px;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace">v${escHtml(item.appVer)}</span>`:''}
+            ${item.appVer?`<span style="font-size:9.5px;color:var(--muted);font-family:var(--font)">v${escHtml(item.appVer)}</span>`:''}
             ${item.isPartial?'<span style="font-size:9px;color:rgba(251,146,60,0.8)">⚠ partial</span>':''}
           </div>
         </div>
@@ -447,10 +477,10 @@
     const totalSz=allItems.reduce((s,i)=>s+(i.fileSize||0),0);
     const fws=allItems.map(i=>i.sysVer).filter(v=>v&&/^\d+\.\d+$/.test(v)).map(v=>parseFloat(v)).sort((a,b)=>a-b);
     const fwRange=fws.length?(fws[0]===fws[fws.length-1]?`FW ${fws[0].toFixed(2)}`:`FW ${fws[0].toFixed(2)} – ${fws[fws.length-1].toFixed(2)}`): '';
-    $('statGames').textContent=games?`${games} Game${games!==1?'s':''}`:'';;
-    $('statPatches').textContent=patches?`${patches} Patch${patches!==1?'es':''}`:'';;
-    $('statDlc').textContent=dlc?`${dlc} DLC`:'';;
-    $('statSize').textContent=totalSz?fmtSize(totalSz)+' total':'';;
+    $('statGames').textContent=games?`${games} Game${games!==1?'s':''}`:'';
+    $('statPatches').textContent=patches?`${patches} Patch${patches!==1?'es':''}`:'';
+    $('statDlc').textContent=dlc?`${dlc} DLC`:'';
+    $('statSize').textContent=totalSz?fmtSize(totalSz)+' total':'';
     $('statFw').textContent=fwRange;
     if($('statFwSep')) $('statFwSep').style.display=fwRange?'':'none';
     document.querySelectorAll('.stat-sep').forEach(sep=>{
@@ -505,15 +535,20 @@
       if (paths.length) {
         srcInput.value = paths.join(', ');
         addRecent(K_RECENT_SRC, paths[0]); refreshAll();
-        toast(`📂 Dropped ${paths.length} path${paths.length>1?'s':''} — click SCAN to search`);
+        toast(`Dropped ${paths.length} path${paths.length>1?'s':''} — click SCAN to search`);
       }
     });
   }
 
   $('btnPickSource').addEventListener('click', async()=>{ const p=await pkgApi.openDirectory(); if(p){srcInput.value=p;addRecent(K_RECENT_SRC,p);refreshAll();}});
   $('btnPickDest').addEventListener('click',   async()=>{ const p=await pkgApi.openDirectory(); if(p){dstInput.value=p;addRecent(K_RECENT_DST,p);refreshAll();}});
-  $('btnClearSource').addEventListener('click',()=>{ srcInput.value=''; srcInput.focus(); });
-  $('btnClearDest').addEventListener('click',  ()=>{ activeFtpDest=null; updateFtpDestUI(); dstInput.value=''; dstInput.disabled=false; $('btnPickDest').disabled=false; dstInput.focus(); });
+  // Logo click → clear source + destination (replaces removed clear buttons)
+  $('logoWrap')?.addEventListener('click', () => {
+    srcInput.value = '';
+    activeFtpDest = null; updateFtpDestUI();
+    dstInput.value = ''; dstInput.disabled = false; $('btnPickDest').disabled = false;
+    toast('Source and destination cleared.');
+  });
   $('btnScanAllDrives').addEventListener('click', async()=>{
     const drives=await pkgApi.getAllDrives();
     if(!drives||!drives.length){toast('No drives detected.','err');return;}
@@ -535,7 +570,7 @@
     const ind=$('ftpDestIndicator'), dst=$('destPath'), pick=$('btnPickDest');
     if(activeFtpDest){
       const label=`ftp://${activeFtpDest.host}:${activeFtpDest.port||2121}/`;
-      if(ind){ind.textContent=`📥 Dest: ${label}`;ind.style.display='flex';}
+      if(ind){ind.textContent=`Dest: ${label}`;ind.style.display='flex';}
       if(dst){dst.value=label;dst.disabled=true;}
       if(pick) pick.disabled=true;
     } else {
@@ -549,11 +584,13 @@
   function csStatus(msg,color){const el=$('csScanStatus');if(!el)return;el.textContent=msg;el.style.color=color||'';}
   function csCfgFromForm(){const mode=$('csFtpMode')?.value||'passive';return{host:$('csHost').value.trim(),port:$('csFtpPort').value.trim()||'2121',user:$('csUser').value.trim()||'anonymous',pass:$('csPass').value||'',path:$('csPkgPath').value.trim()||'/',activeMode:mode==='active'};}
   function openConsoleScanModal(prefill){
-    $('csHost').value=prefill?.host||localStorage.getItem('ps4pkgvault.csHost')||'';
-    $('csFtpPort').value=prefill?.port||localStorage.getItem('ps4pkgvault.csFtpPort')||'2121';
-    $('csUser').value=prefill?.user||'anonymous'; $('csPass').value='';
-    $('csPkgPath').value=localStorage.getItem('ps4pkgvault.csPkgPath')||'/';
-    csStatus(prefill?`${prefill.consoleType||'Console'} found at ${prefill.host} — ready to scan`:'','#4ade80');
+    $('csHost').value       = prefill?.host     || localStorage.getItem('ps4pkgvault.csHost')     || '';
+    $('csFtpPort').value    = prefill?.port     || localStorage.getItem('ps4pkgvault.csFtpPort')  || '2121';
+    $('csUser').value       = prefill?.user     || localStorage.getItem('ps4pkgvault.csUser')     || 'anonymous';
+    $('csPass').value       = prefill?.pass     || localStorage.getItem('ps4pkgvault.csPass')     || '';
+    $('csPkgPath').value    = prefill?.path     || localStorage.getItem('ps4pkgvault.csPkgPath')  || '/';
+    if ($('csFtpMode')) $('csFtpMode').value = prefill?.ftpMode || localStorage.getItem('ps4pkgvault.csFtpMode') || 'passive';
+    csStatus(prefill ? `${prefill.consoleType||'Console'} found at ${prefill.host} — ready to scan` : '', '#4ade80');
     refreshAll(); $('consoleScanBackdrop').style.display='flex';
     setTimeout(()=>{ $('csHost').focus(); if(prefill?.host) $('csPkgPath').focus(); },80);
   }
@@ -561,7 +598,7 @@
   $('btnScanConsole').addEventListener('click',()=>openConsoleScanModal(null));
   $('btnConsoleScanClose').addEventListener('click',closeConsoleScanModal);
   $('btnConsoleScanCancel').addEventListener('click',closeConsoleScanModal);
-  $('consoleScanBackdrop').addEventListener('click',e=>{if(e.target===$('consoleScanBackdrop'))closeConsoleScanModal();});
+  
   $('btnConsoleScanTestConn').addEventListener('click',async()=>{
     const cfg=csCfgFromForm(); if(!cfg.host){csStatus('Enter the console IP address first.','#f87171');return;}
     csStatus('Testing FTP connection…','');
@@ -569,7 +606,7 @@
     csStatus(res.ok?`✓ Connected — ${res.entries} entries at ${cfg.path}`:'✗ '+res.error, res.ok?'#4ade80':'#f87171');
   });
   $('btnConsoleScanDiscover').addEventListener('click',async()=>{
-    const btn=$('btnConsoleScanDiscover'); btn.disabled=true; btn.textContent='⏳';
+    const btn=$('btnConsoleScanDiscover'); btn.disabled=true; btn.textContent='…';
     csStatus('Scanning local network for PS4/PS5…','');
     pkgApi.offDiscoverProgress(); pkgApi.onDiscoverProgress(d=>{
       if(d.type==='found'){
@@ -580,7 +617,7 @@
       else if(d.type==='done'&&(!d.found||!d.found.length)){csStatus('No console found — make sure FTP is running on your PS4/PS5','#f87171');}
     });
     const subnet=$('csSubnet')?.value.trim()||undefined;
-    await pkgApi.discoverPs4(subnet); btn.disabled=false; btn.textContent='🔍 Find'; pkgApi.offDiscoverProgress();
+    await pkgApi.discoverPs4(subnet); btn.disabled=false; btn.textContent='Find'; pkgApi.offDiscoverProgress();
   });
   $('btnConsoleScanPkgs').addEventListener('click',async()=>{
     const cfg=csCfgFromForm(); if(!cfg.host){csStatus('Enter the console IP address first.','#f87171');return;}
@@ -593,20 +630,27 @@
 
   function saveConsoleCfg(cfg){
     if(!cfg.host) return;
-    localStorage.setItem('ps4pkgvault.csHost',cfg.host);
-    localStorage.setItem('ps4pkgvault.csFtpPort',String(cfg.port||2121));
-    if(cfg.path) localStorage.setItem('ps4pkgvault.csPkgPath',cfg.path);
-    localStorage.setItem('ps4vault.installPs4Ip',cfg.host);
-    addRecent(K_RECENT_FTP,cfg.host); refreshAll();
+    localStorage.setItem('ps4pkgvault.csHost',    cfg.host);
+    localStorage.setItem('ps4pkgvault.csFtpPort', String(cfg.port||2121));
+    if(cfg.path)    localStorage.setItem('ps4pkgvault.csPkgPath',  cfg.path);
+    if(cfg.user)    localStorage.setItem('ps4pkgvault.csUser',     cfg.user);
+    if(cfg.pass     !== undefined) localStorage.setItem('ps4pkgvault.csPass', cfg.pass);
+    if(cfg.ftpMode) localStorage.setItem('ps4pkgvault.csFtpMode',  cfg.ftpMode);
+    localStorage.setItem('ps4vault.installPs4Ip', cfg.host);
+    addRecent(K_RECENT_FTP, cfg.host); refreshAll();
     const ipEl=$('installPs4Ip'); if(ipEl&&!ipEl.value) ipEl.value=cfg.host;
   }
-  function saveCsSettings(cfg){saveConsoleCfg(cfg);}
+  function saveCsSettings(cfg){
+    // Persist all form fields including ftpMode which csCfgFromForm captures
+    const ftpMode=$('csFtpMode')?.value||'passive';
+    saveConsoleCfg({...cfg, ftpMode});
+  }
 
   // ── Discovered console chip ───────────────────────────────────────────────────
   function showDiscoveredChip(d){
     const ftpPort=d.ftpPort||2121;
     $('discoveredChipLabel').textContent=`${d.consoleType||'Console'} · ${d.ip}:${ftpPort}`;
-    $('discoveredChipIcon').textContent=d.consoleType==='PS5'?'🟦':'🎮';
+    
     $('discoveredChip').style.display='flex'; discoveredConsole=d;
     saveConsoleCfg({host:d.ip,port:ftpPort});
     const ipEl=$('installPs4Ip'); if(ipEl) ipEl.value=d.ip;
@@ -624,7 +668,7 @@
     if(!discoveredConsole)return;
     activeFtpDest={host:discoveredConsole.ip,port:String(discoveredConsole.ftpPort||2121),user:'anonymous',pass:'',path:'/'};
     saveConsoleCfg(activeFtpDest); updateFtpDestUI();
-    toast(`📥 Destination set to ${discoveredConsole.consoleType||'Console'} at ${discoveredConsole.ip}`);
+    toast(`Destination set to ${discoveredConsole.consoleType||'Console'} at ${discoveredConsole.ip}`);
   });
 
   // ── Installed scan ────────────────────────────────────────────────────────────
@@ -655,7 +699,7 @@
       const ib=$('catInstalled');if(ib){ib.classList.add('active');activeCat='Installed';}
       const total=returned.reduce((s,i)=>s+(i.fileSize||0),0);
       if(total>0){const bar=$('consoleStorageBar'),fill=$('consoleStorageFill'),label=$('consoleStorageLabel');
-        if(bar&&fill&&label){const pct=Math.min(100,Math.round(total/500e9*100));fill.style.width=pct+'%';label.textContent=`${fmtSize(total)} used`;bar.style.display='block';}}
+        if(bar&&fill&&label){const pct=Math.min(100,Math.round(total/2e12*100));fill.style.width=pct+'%';label.textContent=`${fmtSize(total)} used`;bar.style.display='block';}}
     }
     toast(`Found ${returned?.length||0} installed game${returned?.length!==1?'s':''}.`);
   }
@@ -667,7 +711,7 @@
   function applyViewMode(){
     const isGrid=viewMode==='grid';
     $('tableView').style.display=isGrid?'none':''; $('gridView').style.display=isGrid?'':'none';
-    $('btnViewToggle').textContent=isGrid?'☰ Table':'⊞ Grid';
+    $('btnViewToggle').textContent=isGrid?'Table':'Grid';
     $('btnViewToggle').classList.toggle('active',isGrid); renderTable();
   }
   $('btnViewToggle').addEventListener('click',()=>{viewMode=viewMode==='table'?'grid':'table';saveSetting('viewMode',viewMode);applyViewMode();});
@@ -730,14 +774,14 @@
   // ── Delete ────────────────────────────────────────────────────────────────────
   window.deleteOne=async(fp)=>{
     const item=allItems.find(i=>i.filePath===fp); if(!item)return;
-    if(!await showConfirm(`Delete ${item.fileName}?`, { sub:'This cannot be undone.', icon:'🗑' }))return;
+    if(!await showConfirm(`Delete ${item.fileName}?`, { sub:'This cannot be undone.' }))return;
     const results=await pkgApi.deletePkgs([item]);
     if(results[0]?.ok){allItems=allItems.filter(i=>i.filePath!==fp);selectedSet.delete(fp);applyFilters();toast(`Deleted ${item.fileName}`);}
     else toast('Delete failed: '+results[0]?.error,'err');
   };
   $('btnDeleteSelected').addEventListener('click',async()=>{
     const sel=allItems.filter(i=>selectedSet.has(i.filePath)); if(!sel.length)return;
-    if(!await showConfirm(`Delete ${sel.length} PKG file${sel.length>1?'s':''}?`, { sub:'This cannot be undone.', icon:'🗑' }))return;
+    if(!await showConfirm(`Delete ${sel.length} PKG file${sel.length>1?'s':''}?`, { sub:'This cannot be undone.' }))return;
     const results=await pkgApi.deletePkgs(sel);
     const ok=results.filter(r=>r.ok),errs=results.filter(r=>!r.ok);
     ok.forEach(r=>{allItems=allItems.filter(i=>i.filePath!==r.filePath);selectedSet.delete(r.filePath);});
@@ -769,7 +813,7 @@
   });
   $('btnRenameCancel').addEventListener('click',closeRenameModal);
   $('btnRenameClose')?.addEventListener('click',closeRenameModal);
-  renameBackdrop.addEventListener('click',e=>{if(e.target===renameBackdrop)closeRenameModal();});
+  
   function closeRenameModal(){renameBackdrop.style.display='none';renameTarget=null;}
   window.startRenameInline=(e,fp)=>{e.stopPropagation();const item=allItems.find(i=>i.filePath===fp);if(item)openRenameModal(item);};
   $('btnRenameSelected').addEventListener('click',()=>{if(!selectedSet.size)return;if(selectedSet.size===1)openRenameModal(allItems.find(i=>i.filePath===[...selectedSet][0]));else openRenameModal(null);});
@@ -853,7 +897,7 @@
   }
   $('goModalCancel').addEventListener('click',()=>pkgApi.cancelOperation());
   $('goModalClose').addEventListener('click',()=>{goBackdrop.style.display='none';});
-  goBackdrop.addEventListener('click',e=>{if(e.target===goBackdrop&&goDone)goBackdrop.style.display='none';});
+  
 
   // ── Layout format visibility ──────────────────────────────────────────────────
   $('layoutSelect').addEventListener('change',e=>{const show=e.target.value==='rename'||e.target.value==='rename-organize';$('renameFmtRow').style.display=show?'flex':'none';});
@@ -861,7 +905,7 @@
   // ── Menu ──────────────────────────────────────────────────────────────────────
   $('topMenu').addEventListener('change',async e=>{
     const v=e.target.value; e.target.value='';
-    if(v==='clear'){if(!await showConfirm('Clear all scan results?', { icon:'🧹', okLabel:'Clear', okClass:'btn' }))return;allItems=[];filteredItems=[];selectedSet.clear();renderTable();updateCounts();}
+    if(v==='clear'){if(!await showConfirm('Clear all scan results?', { okLabel:'Clear', okClass:'btn' }))return;allItems=[];filteredItems=[];selectedSet.clear();renderTable();updateCounts();}
     if(v==='selectAll'){filteredItems.forEach(i=>selectedSet.add(i.filePath));renderTable();updateSelectionUI();}
     if(v==='unselectAll'){selectedSet.clear();renderTable();updateSelectionUI();}
     if(v==='exportCsv') exportCsv();
@@ -905,7 +949,7 @@
   async function deleteDuplicates(){
     const dupes=allItems.filter(i=>i.isDuplicate);
     if(!dupes.length){toast('No duplicates found.');return;}
-    if(!await showConfirm(`Delete ${dupes.length} duplicate PKG${dupes.length>1?'s':''}?`, { sub:'One copy of each game will be kept. This cannot be undone.', icon:'🗑' }))return;
+    if(!await showConfirm(`Delete ${dupes.length} duplicate PKG${dupes.length>1?'s':''}?`, { sub:'One copy of each game will be kept. This cannot be undone.' }))return;
     // Group by contentId, keep first, delete rest
     const seen=new Set(),toDelete=[];
     allItems.forEach(item=>{
@@ -936,9 +980,9 @@
   $('settingScanDepth').addEventListener('input',e=>{scanDepth=parseInt(e.target.value)||10;$('settingScanDepthVal').textContent=scanDepth;saveSetting('scanDepth',scanDepth);});
   $('settingInstallDelay').addEventListener('input',e=>{installDelay=parseInt(e.target.value)*1000;$('settingInstallDelayVal').textContent=e.target.value+'s';saveSetting('installDelay',installDelay);});
   $('settingFtpPool')?.addEventListener('input',e=>{ftpPool=parseInt(e.target.value)||3;$('settingFtpPoolVal').textContent=ftpPool;saveSetting('ftpPool',ftpPool);pkgApi.setSetting?.('ftpPool',ftpPool);});
-  $('btnSaveLibrary').addEventListener('click',async()=>{if(!allItems.length){toast('Nothing to save.','err');return;}const r=await pkgApi.saveLibrary(allItems);toast(r.ok?`✅ Saved ${allItems.length} items.`:'Failed: '+r.error,r.ok?'ok':'err');});
-  $('btnLoadLibrary').addEventListener('click',async()=>{const r=await pkgApi.loadLibrary();if(!r.ok||!r.items?.length){toast('No saved library found.','err');return;}allItems=r.items;filteredItems=[];selectedSet.clear();activeCat='all';document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));$('catAll')?.classList.add('active');applyFilters();updateCounts();toast(`✅ Loaded ${r.items.length} items.`);closeSettingsModal();});
-  $('btnClearLibrary').addEventListener('click',async()=>{if(!await showConfirm('Clear saved library?', { sub:'Your current scan results will not be affected.', icon:'📚', okLabel:'Clear', okClass:'btn' }))return;await pkgApi.clearLibrary?.();toast('Library cleared.');});
+  $('btnSaveLibrary').addEventListener('click',async()=>{if(!allItems.length){toast('Nothing to save.','err');return;}const r=await pkgApi.saveLibrary(allItems);toast(r.ok?`Saved ${allItems.length} items.`:'Failed: '+r.error,r.ok?'ok':'err');});
+  $('btnLoadLibrary').addEventListener('click',async()=>{const r=await pkgApi.loadLibrary();if(!r.ok||!r.items?.length){toast('No saved library found.','err');return;}allItems=r.items;filteredItems=[];selectedSet.clear();activeCat='all';document.querySelectorAll('.cat-tab').forEach(b=>b.classList.remove('active'));$('catAll')?.classList.add('active');applyFilters();updateCounts();toast(`Loaded ${r.items.length} items.`);closeSettingsModal();});
+  $('btnClearLibrary').addEventListener('click',async()=>{if(!await showConfirm('Clear saved library?', { sub:'Your current scan results will not be affected.', okLabel:'Clear', okClass:'btn' }))return;await pkgApi.clearLibrary?.();toast('Library cleared.');});
 
   // ── Toast ──────────────────────────────────────────────────────────────────────
   let toastTimer=null;
@@ -946,32 +990,57 @@
 
   // ── Custom confirm modal — replaces native confirm() ─────────────────────
   let _confirmResolve = null;
-  function showConfirm(msg, { sub='', icon='🗑', okLabel='Confirm', okClass='btn-danger' } = {}) {
+  let _confirmIsInput = false;
+  function showConfirm(msg, { sub='', okLabel='Confirm', okClass='btn-danger' } = {}) {
     return new Promise(resolve => {
       _confirmResolve = resolve;
+      _confirmIsInput = false;
       $('confirmMsg').textContent  = msg;
       $('confirmSub').textContent  = sub;
       $('confirmSub').style.display = sub ? 'block' : 'none';
-      $('confirmIcon').textContent = icon;
+      $('confirmIcon').style.display = 'none';
+      $('confirmInput').style.display = 'none';
       $('btnConfirmOk').textContent = okLabel;
       $('btnConfirmOk').className   = okClass;
       $('confirmBackdrop').style.display = 'flex';
     });
   }
+  // showInputDialog — replaces prompt() which is blocked in Electron contextIsolation mode
+  function showInputDialog(title, sub, defaultValue = '') {
+    return new Promise(resolve => {
+      _confirmResolve = resolve;
+      _confirmIsInput = true;
+      $('confirmMsg').textContent  = title;
+      $('confirmSub').textContent  = sub;
+      $('confirmSub').style.display = sub ? 'block' : 'none';
+      $('confirmIcon').style.display = 'none';
+      $('btnConfirmOk').textContent = 'Save';
+      $('btnConfirmOk').className   = 'btn-scan';
+      const inp = $('confirmInput');
+      inp.style.display = 'block';
+      inp.value = defaultValue;
+      $('confirmBackdrop').style.display = 'flex';
+      setTimeout(() => { inp.focus(); inp.select(); }, 50);
+    });
+  }
+  $('confirmInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('btnConfirmOk').click();
+    if (e.key === 'Escape') $('btnConfirmCancel').click();
+  });
   $('btnConfirmOk').addEventListener('click', () => {
     $('confirmBackdrop').style.display = 'none';
-    if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+    $('confirmInput').style.display = 'none';
+    if (_confirmResolve) {
+      _confirmResolve(_confirmIsInput ? $('confirmInput').value.trim() : true);
+      _confirmResolve = null;
+    }
   });
   $('btnConfirmCancel').addEventListener('click', () => {
     $('confirmBackdrop').style.display = 'none';
-    if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+    $('confirmInput').style.display = 'none';
+    if (_confirmResolve) { _confirmResolve(_confirmIsInput ? null : false); _confirmResolve = null; }
   });
-  $('confirmBackdrop').addEventListener('click', e => {
-    if (e.target === $('confirmBackdrop')) {
-      $('confirmBackdrop').style.display = 'none';
-      if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
-    }
-  });
+
 
   // ── Remote install modal ──────────────────────────────────────────────────────
   const installBackdrop=$('installModalBackdrop');
@@ -986,23 +1055,20 @@
     let savedSrvPort=localStorage.getItem('ps4vault.installSrvPort')||'8090';
     if(['2121','21','1337','9090','12800'].includes(savedSrvPort)){savedSrvPort='8090';localStorage.setItem('ps4vault.installSrvPort','8090');}
     $('installPs4Ip').value=savedIp; $('installPs4Port').value=savedPort; $('installSrvPort').value=savedSrvPort;
-    try{const localIp=await pkgApi.getLocalIp();$('installLocalIp').textContent=localIp;$('installBaseUrl').textContent=`http://${localIp}:${savedSrvPort}/`;$('installLocalIpBox').style.display='flex';}catch{$('installLocalIpBox').style.display='none';}
+    try{const localIp=await pkgApi.getLocalIp();}catch{}
     renderInstallItems(items);
     $('installDiscoverStatus').style.display='none';
-    $('installPhaseBar').style.display=$('installXferWrap').style.display='none';
+    $('installPhaseBar').style.display='none';
     $('installWarnBox').style.display=$('installSummary').style.display='none';
     $('installWarnBox').textContent=$('installSummary').textContent='';
-    $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='📡 Send to PS4 / PS5';
+    $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='Send to PS4 / PS5';
     $('btnInstallCancel').textContent='Close'; $('btnInstallClose').style.display='flex';
     installBackdrop.dataset.items=JSON.stringify(items.map(i=>i.filePath));
     installBackdrop.style.display='flex'; setTimeout(()=>$('installPs4Ip').focus(),80);
   }
   function renderInstallItems(items){
-    $('installItemsList').innerHTML=items.map(item=>`<div class="install-item" id="ii-${escAttr(item.filePath)}"><div class="ii-icon">📦</div><div class="ii-info"><div class="ii-name" title="${escHtml(item.filePath)}">${escHtml(item.title||item.fileName)}</div><div class="ii-status" id="ii-status-${escAttr(item.filePath)}">${item.isFtp?'⚠ FTP — will be skipped':'Waiting…'}</div><div class="ii-bar-wrap" id="ii-bar-wrap-${escAttr(item.filePath)}" style="display:none"><div class="ii-bar" id="ii-bar-${escAttr(item.filePath)}" style="width:0%"></div></div></div></div>`).join('');
+    $('installItemsList').innerHTML=items.map(item=>`<div class="install-item" id="ii-${escAttr(item.filePath)}"><div class="ii-info"><div class="ii-name" title="${escHtml(item.filePath)}">${escHtml(item.title||item.fileName)}</div><div class="ii-status" id="ii-status-${escAttr(item.filePath)}">${item.isFtp?'FTP — will be skipped':'Waiting…'}</div><div class="ii-bar-wrap" id="ii-bar-wrap-${escAttr(item.filePath)}" style="display:none"><div class="ii-bar" id="ii-bar-${escAttr(item.filePath)}" style="width:0%"></div></div></div></div>`).join('');
   }
-
-  // Feature 14: copy server URL
-  $('btnCopyServerUrl')?.addEventListener('click',()=>{const url=$('installBaseUrl').textContent;if(url&&url!=='—'){pkgApi.copyToClipboard(url);toast('Server URL copied');}});
 
   // Feature 6 (FIX 6): PKG verify in context menu
   async function verifyPkgItem(fp) {
@@ -1021,13 +1087,13 @@
   $('btnSpeedTest')?.addEventListener('click',async()=>{
     const ps4Ip=$('installPs4Ip').value.trim(), srvPort=parseInt($('installSrvPort').value)||8090;
     if(!ps4Ip){toast('Enter the PS4/PS5 IP first.','err');return;}
-    const btn=$('btnSpeedTest'); btn.disabled=true; btn.textContent='⏳ Testing…';
+    const btn=$('btnSpeedTest'); btn.disabled=true; btn.textContent='Testing…';
     const status=$('installDiscoverStatus');
     if(status){status.style.display='block';status.style.color='';status.textContent='Uploading 4 MB to PS4/PS5 to measure speed…';}
     const r=await pkgApi.speedTestPs4(ps4Ip,12800,srvPort).catch(e=>({ok:false,error:e.message}));
-    btn.disabled=false; btn.textContent='⚡ Speed Test';
+    btn.disabled=false; btn.textContent='Speed Test';
     if(r.ok){
-      const msg=`⚡ ${r.mbps} MB/s (${r.mbpsNet} Mbps) — 4 MB in ${r.elapsed}ms`;
+      const msg=`${r.mbps} MB/s (${r.mbpsNet} Mbps) — 4 MB in ${r.elapsed}ms`;
       if(status){status.style.color='#4ade80';status.textContent=msg;}
       toast(msg);
     } else {
@@ -1039,23 +1105,22 @@
   // ── Install discover ──────────────────────────────────────────────────────────
   $('btnDiscoverPs4').addEventListener('click',async()=>{
     const btn=$('btnDiscoverPs4'),status=$('installDiscoverStatus');
-    btn.disabled=true; btn.textContent='⏳ Scanning…'; status.style.display='block'; status.textContent='Scanning local network for PS4/PS5…';
+    btn.disabled=true; btn.textContent='Scanning…'; status.style.display='block'; status.textContent='Scanning local network for PS4/PS5…';
     pkgApi.offDiscoverProgress(); pkgApi.onDiscoverProgress(d=>{
       if(d.type==='found'){const note=d.installerOpen?' — Remote PKG Installer ready ✓':` — found on FTP:${d.ftpPort||2121}`;status.style.color=d.installerOpen?'#4ade80':'#facc15';status.textContent=`${d.consoleType||'Console'} at ${d.ip}${note}`;showDiscoveredChip(d);}
       else if(d.type==='batch-done'){if(status.textContent.startsWith('Scanning'))status.textContent=`Scanning… ${d.scanned}/${d.total} hosts`;}
-      else if(d.type==='done'){btn.disabled=false;btn.textContent='🔍 Find IP';if(!d.found||!d.found.length){status.style.color='#f87171';status.textContent='✗ No console found';}}
+      else if(d.type==='done'){btn.disabled=false;btn.textContent='Find IP';if(!d.found||!d.found.length){status.style.color='#f87171';status.textContent='✗ No console found';}}
     });
-    await pkgApi.discoverPs4(); btn.disabled=false; btn.textContent='🔍 Find IP'; pkgApi.offDiscoverProgress(); // auto subnet
+    await pkgApi.discoverPs4(); btn.disabled=false; btn.textContent='Find IP'; pkgApi.offDiscoverProgress(); // auto subnet
   });
-  $('installSrvPort').addEventListener('input',async()=>{try{const ip=await pkgApi.getLocalIp();$('installBaseUrl').textContent=`http://${ip}:${$('installSrvPort').value||'8090'}/`;}catch{}});
   $('btnTestPs4Conn').addEventListener('click',async()=>{
     const btn=$('btnTestPs4Conn'),status=$('installDiscoverStatus');
     const ps4Ip=$('installPs4Ip').value.trim(),ps4Port=parseInt($('installPs4Port').value)||12800;
     if(!ps4Ip){toast('Enter the PS4/PS5 IP address first.','err');return;}
     if([2121,21,1337,9090].includes(ps4Port)){toast(`⚠ Port ${ps4Port} is an FTP port.`,'err');$('installPs4Port').value='12800';return;}
-    btn.disabled=true; btn.textContent='⏳ Testing…'; status.style.display='block'; status.style.color=''; status.textContent=`Testing ${ps4Ip}:${ps4Port}…`;
+    btn.disabled=true; btn.textContent='Testing…'; status.style.display='block'; status.style.color=''; status.textContent=`Testing ${ps4Ip}:${ps4Port}…`;
     const result=await pkgApi.testPs4Conn(ps4Ip,ps4Port);
-    btn.disabled=false; btn.textContent='🔌 Test Connection';
+    btn.disabled=false; btn.textContent='Test Connection';
     if(result.ok){status.style.color='#4ade80';status.textContent=`✓ PS4 installer reachable at ${ps4Ip}:${ps4Port}`;$('installWarnBox').style.display='none';}
     else{status.style.color='#f87171';status.textContent=`✗ ${result.error}`;}
   });
@@ -1069,15 +1134,15 @@
     localStorage.setItem('ps4vault.installSrvPort',String(srvPort)); localStorage.setItem('ps4pkgvault.csHost',ps4Ip);
     const fps=JSON.parse(installBackdrop.dataset.items||'[]'),items=fps.map(fp=>allItems.find(i=>i.filePath===fp)).filter(Boolean);
     if(!items.length) return;
-    installActive=true; $('btnInstallStart').disabled=true; $('btnInstallStart').textContent='⏳ Installing…';
+    installActive=true; $('btnInstallStart').disabled=true; $('btnInstallStart').textContent='Installing…';
     $('btnInstallCancel').textContent='Cancel'; $('btnInstallClose').style.display='none';
     $('installWarnBox').style.display=$('installSummary').style.display='none';
-    $('installPhaseBar').style.display=$('installXferWrap').style.display='none';
-    $('installElapsed').textContent=''; $('installXferBar').style.width='0%';
-    items.forEach(item=>{const el=document.getElementById(`ii-${item.filePath}`);if(el)el.className='install-item';const st=document.getElementById(`ii-status-${item.filePath}`);if(st)st.textContent=item.isFtp?'⚠ FTP — will be skipped':'Queued…';const bw=document.getElementById(`ii-bar-wrap-${item.filePath}`);if(bw)bw.style.display='none';});
+    $('installPhaseBar').style.display='none';
+    $('installElapsed').textContent='';
+    items.forEach(item=>{const el=document.getElementById(`ii-${item.filePath}`);if(el)el.className='install-item';const st=document.getElementById(`ii-status-${item.filePath}`);if(st)st.textContent=item.isFtp?'FTP — will be skipped':'Queued…';const bw=document.getElementById(`ii-bar-wrap-${item.filePath}`);if(bw)bw.style.display='none';});
     pkgApi.offInstallProgress(); pkgApi.onInstallProgress(handleInstallProgress);
     pkgApi.remoteInstall(items, ps4Ip, ps4Port, srvPort, installDelay).catch(e=>{ // FIX 2: pass delay
-      installActive=false; $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='📡 Send to PS4 / PS5';
+      installActive=false; $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='Send to PS4 / PS5';
       $('btnInstallCancel').textContent='Close'; $('btnInstallClose').style.display='flex';
       toast('Install error: '+e.message,'err');
     });
@@ -1094,33 +1159,29 @@
   function installUpdateXfer(bytesSent,totalBytes,preCalcSpeed){
     if(preCalcSpeed>1024){_installEwmaSpeed=_installEwmaSpeed>0?0.3*preCalcSpeed+0.7*_installEwmaSpeed:preCalcSpeed;}
     const speed=_installEwmaSpeed,pct=totalBytes>0?Math.round(bytesSent/totalBytes*100):null,rem=totalBytes-bytesSent;
-    const eta=speed>1024&&rem>0?Math.min(Math.round(rem/speed),86400):null;
-    $('installXferWrap').style.display='block'; $('installXferBar').style.width=(pct??0)+'%';
-    $('installXferSpeed').innerHTML=speed>0?`<span class="hi">${fmtSpeed(speed)}</span>`:'';
-    $('installXferEta').innerHTML=eta!==null?`ETA <span class="hi">${fmtSec(eta)}</span>`:'';
-    $('installXferBytes').innerHTML=totalBytes?`<span class="hi">${fmtSize(bytesSent)}</span> / <span style="color:var(--muted)">${fmtSize(totalBytes)}</span>`:'';
+    // xfer bar removed — stats live only in per-item card now
     return pct;
   }
 
   function handleInstallProgress(d){
     if(d.type==='install-connecting'){installStartElapsed();installSetPhase('Connecting…',`Reaching ${d.ps4Ip}:${d.ps4Port}`,'active');$('installDiscoverStatus').style.display='none';}
-    else if(d.type==='install-ps4-unreachable'){installStopElapsed();installSetPhase('Connection failed',d.message.split('\n')[0],'error');$('installWarnBox').innerHTML=d.message.replace(/\n/g,'<br>');$('installWarnBox').style.display='block';$('btnInstallStart').disabled=false;$('btnInstallStart').textContent='📡 Send to PS4 / PS5';$('btnInstallCancel').textContent='Close';$('btnInstallClose').style.display='flex';installActive=false;}
+    else if(d.type==='install-ps4-unreachable'){installStopElapsed();installSetPhase('Connection failed',d.message.split('\n')[0],'error');$('installWarnBox').innerHTML=d.message.replace(/\n/g,'<br>');$('installWarnBox').style.display='block';$('btnInstallStart').disabled=false;$('btnInstallStart').textContent='Send to PS4 / PS5';$('btnInstallCancel').textContent='Close';$('btnInstallClose').style.display='flex';installActive=false;}
     else if(d.type==='install-ps4-ok'){installSetPhase('Connected ✓',`${d.ps4Ip}:${d.ps4Port} — detecting installer…`,'active');}
-    else if(d.type==='install-warn'){const msg=d.message||'';if(msg.startsWith('📡 Installer:'))installSetPhase('Connected ✓',msg,'active');else if(!msg.includes('Firewall')&&!msg.includes('port rule')){$('installWarnBox').innerHTML=msg.replace(/\n/g,'<br>');$('installWarnBox').style.display='block';}}
-    else if(d.type==='install-server-ready'){installSetPhase('File server ready',`http://${d.localIp}:${d.serverPort}/ — waiting…`,'active');$('installLocalIp').textContent=d.localIp;$('installBaseUrl').textContent=`http://${d.localIp}:${d.serverPort}/`;$('installLocalIpBox').style.display='flex';}
+    else if(d.type==='install-warn'){const msg=d.message||'';if(msg.startsWith('Installer:'))installSetPhase('Connected ✓',msg,'active');else if(!msg.includes('Firewall')&&!msg.includes('port rule')){$('installWarnBox').innerHTML=msg.replace(/\n/g,'<br>');$('installWarnBox').style.display='block';}}
+    else if(d.type==='install-server-ready'){installSetPhase('File server ready',`http://${d.localIp}:${d.serverPort}/ — waiting…`,'active');}
     else if(d.type==='install-file-start'){installResetXfer();const el=findItemEl(d.file);if(el)el.className='install-item ii-active';setItemPhase(d.file,'sending');setItemStatus(d.file,'Sending install command…');installSetPhase('Sending command',d.title||d.file,'active');}
     else if(d.type==='install-file-queued'){setItemPhase(d.file,'dl');const tid=d.taskId!==null?` (task #${d.taskId})`:'';setItemStatus(d.file,`Command accepted${tid} — waiting for PS4/PS5…`);setItemBar(d.file,0,true);installSetPhase('Command accepted','Waiting for PS4/PS5 to connect…','active');}
-    else if(d.type==='install-xfer-progress'){const pct=installUpdateXfer(d.bytesSent,d.totalBytes,d.speed);const speed=_installEwmaSpeed>0?fmtSpeed(_installEwmaSpeed):'',eta=d.eta!==null?fmtSec(d.eta):'',bytes=d.totalBytes?`${fmtSize(d.bytesSent)} / ${fmtSize(d.totalBytes)}`:'';setItemTitle(d.file,d.title||d.file);setItemPhase(d.file,'dl');setItemStatus(d.file,pct!==null?`Downloading — ${pct}%`:'Downloading…');setItemStats(d.file,speed,eta,bytes);if(pct!==null)setItemBar(d.file,pct,true);installSetPhase('PS4/PS5 downloading',[pct!==null?pct+'%':'',speed,eta?'ETA '+eta:'',bytes].filter(Boolean).join('  ·  '),'active');}
-    else if(d.type==='install-task-progress'){const pct=d.percent??null,eta=d.rest?fmtSec(d.rest):'',bytes=d.transferred?fmtSize(d.transferred):'',status=(d.status&&d.status!=='null')?d.status:'';setItemPhase(d.file,'dl');setItemStatus(d.file,status||(pct!==null?`Installing — ${pct}%`:'Installing…'));setItemStats(d.file,'',eta,bytes);if(pct!==null)setItemBar(d.file,pct,true);}
+    else if(d.type==='install-xfer-progress'){const pct=installUpdateXfer(d.bytesSent,d.totalBytes,d.speed);const speed=_installEwmaSpeed>0?fmtSpeed(_installEwmaSpeed):'',eta=d.eta!==null?fmtSec(d.eta):'',bytes=d.totalBytes?`${fmtSize(d.bytesSent)} / ${fmtSize(d.totalBytes)}`:'';setItemTitle(d.file,d.title||d.file);setItemPhase(d.file,'dl');setItemStatus(d.file,pct!==null?`${pct}%`:'');setItemStats(d.file,speed,eta,bytes);if(pct!==null)setItemBar(d.file,pct,true);installSetPhase('Downloading','','active');}
+    else if(d.type==='install-task-progress'){const pct=d.percent??null,eta=d.rest?fmtSec(d.rest):'',bytes=d.transferred?fmtSize(d.transferred):'',status=(d.status&&d.status!=='null')?d.status:'';setItemPhase(d.file,'dl');setItemStatus(d.file,status||(pct!==null?`${pct}%`:''));setItemStats(d.file,'',eta,bytes);if(pct!==null)setItemBar(d.file,pct,true);}
     else if(d.type==='install-file-done'){const el=findItemEl(d.file);if(el)el.className='install-item ii-done';setItemPhase(d.file,'done');setItemStatus(d.file,'Install queued on PS4/PS5 — check console notifications');setItemStats(d.file,'','','');setItemBar(d.file,100,true);installSetPhase('Complete ✓','Check PS4/PS5 notifications','done');}
     else if(d.type==='install-file-error'){const el=findItemEl(d.file);if(el)el.className='install-item ii-error';setItemPhase(d.file,'error');setItemStatus(d.file,d.error||'Unknown error');installSetPhase('Failed',(d.error||'').split('\n')[0],'error');}
     else if(d.type==='install-done'){
       installStopElapsed(); installActive=false;
-      $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='📡 Send to PS4 / PS5 Again';
+      $('btnInstallStart').disabled=false; $('btnInstallStart').textContent='Send to PS4 / PS5 Again';
       $('btnInstallCancel').textContent='Close'; $('btnInstallClose').style.display='flex';
       const parts=[`${d.ok} sent`];if(d.failed)parts.push(`${d.failed} failed`);if(d.skipped)parts.push(`${d.skipped} skipped`);
       $('installSummary').textContent=parts.join(' · '); $('installSummary').style.display='block';
-      if(d.failed===0&&d.ok>0)toast(`✅ ${d.ok} PKG${d.ok!==1?'s':''} sent to PS4/PS5!`);
+      if(d.failed===0&&d.ok>0)toast(`${d.ok} PKG${d.ok!==1?'s':''} sent to PS4/PS5!`);
       else if(d.ok===0)toast('Install failed — check the modal for details.','err');
     }
   }
@@ -1134,8 +1195,8 @@
 
   $('btnInstallCancel').addEventListener('click',closeInstallModal);
   $('btnInstallClose').addEventListener('click',closeInstallModal);
-  installBackdrop.addEventListener('click',e=>{if(e.target===installBackdrop&&!installActive)closeInstallModal();});
-  function closeInstallModal(){if(installActive){pkgApi.cancelOperation();installActive=false;$('btnInstallStart').disabled=false;$('btnInstallStart').textContent='📡 Send to PS4 / PS5';$('btnInstallCancel').textContent='Close';$('btnInstallClose').style.display='flex';installStopElapsed();installSetPhase('Cancelled','Install was cancelled','error');return;}installBackdrop.style.display='none';pkgApi.offInstallProgress();}
+  
+  function closeInstallModal(){if(installActive){pkgApi.cancelOperation();installActive=false;$('btnInstallStart').disabled=false;$('btnInstallStart').textContent='Send to PS4 / PS5';$('btnInstallCancel').textContent='Close';$('btnInstallClose').style.display='flex';installStopElapsed();installSetPhase('Cancelled','Install was cancelled','error');return;}installBackdrop.style.display='none';pkgApi.offInstallProgress();}
 
   // ── Context menu ──────────────────────────────────────────────────────────────
   const ctxMenu=$('ctxMenu');
@@ -1173,7 +1234,7 @@
     pkgApi.getLogoDataUrl().then(dataUrl => {
       if (dataUrl) { const al=$('aboutLogo'); if(al) al.src=dataUrl; }
     }).catch(()=>{});
-    pkgApi.getLogPath().then(p=>{const el=$('aboutLogPath');if(el){el.textContent='📋 Log: '+p;el.title='Click to open log folder';}}).catch(()=>{});
+    pkgApi.getLogPath().then(p=>{const el=$('aboutLogPath');if(el){el.textContent='Log: '+p;el.title='Click to open log folder';}}).catch(()=>{});
     $('aboutModalBackdrop').style.display='flex';
   }
   function closeAboutModal(){$('aboutModalBackdrop').style.display='none';}
@@ -1182,7 +1243,7 @@
   $('btnAboutDiscord').addEventListener('click',()=>pkgApi.openExternal('https://discord.gg/nj45kDSBEd'));
   $('btnAboutViewLog').addEventListener('click',()=>pkgApi.openLog());
   $('aboutLogPath').addEventListener('click',()=>pkgApi.openLogFolder());
-  $('aboutModalBackdrop').addEventListener('click',e=>{if(e.target===$('aboutModalBackdrop'))closeAboutModal();});
+  
 
   // ── Auto-updater banner ───────────────────────────────────────────────────────
   let _pendingUpdateUrl = null;

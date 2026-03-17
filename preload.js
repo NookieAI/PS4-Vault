@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('pkgApi', {
   downloadAndInstallUpdate:   (url)   => ipcRenderer.invoke('download-and-install-update', url),
   onUpdateAvailable:          (cb)    => ipcRenderer.on('update-available',         (_, d) => cb(d)),
   onUpdateDownloadProgress:   (cb)    => ipcRenderer.on('update-download-progress', (_, d) => cb(d)),
+  onAppVersion:               (cb)    => ipcRenderer.on('app-version',              (_, v) => cb(v)),
 
   // ── Console discovery ──────────────────────────────────────────────────────
   discoverPs4:         (subnet)                         => ipcRenderer.invoke('discover-ps4', subnet),
@@ -59,7 +60,6 @@ contextBridge.exposeInMainWorld('pkgApi', {
 
   // ── Remote install ───────────────────────────────────────────────────────────
   remoteInstall:       (items, ps4Ip, ps4Port, srvPort, installDelay) => ipcRenderer.invoke('remote-install', items, ps4Ip, ps4Port, srvPort, installDelay),
-  stopPkgServer:       ()                               => ipcRenderer.invoke('stop-pkg-server'),
 
   // ── Progress event streams ───────────────────────────────────────────────────
   onScanProgress:      cb  => ipcRenderer.on('scan-progress',           (_e, d) => cb(d)),
