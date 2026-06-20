@@ -135,6 +135,41 @@ jobs:
           tag_name: ${{ needs.create-release.outputs.tag }}
           files: dist/**/*.dmg
 
+  build-mac-x64:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download Inter font
+        run: |
+          mkdir -p assets/fonts
+          curl -L "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o inter.zip
+          unzip -o inter.zip -d inter-tmp
+          woff2=$(find inter-tmp -name "Inter.woff2" | head -1)
+          if [ -z "$woff2" ]; then
+            woff2=$(find inter-tmp -name "*.woff2" | grep -iv italic | head -1)
+          fi
+          cp "$woff2" assets/fonts/inter.woff2
+          rm -rf inter.zip inter-tmp
+
+      - run: npm ci
+
+      - name: Build Mac (Intel x64)
+        run: npx electron-builder --mac --x64 --publish never
+
+      - name: Upload Mac x64 DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.create-release.outputs.tag }}
+          files: dist/**/*.dmg
+
   build-linux:
     needs: create-release
     runs-on: ubuntu-latest
