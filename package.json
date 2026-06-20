@@ -1,0 +1,89 @@
+{
+  "name": "ps4-vault",
+  "version": "1.1.0",
+  "description": "PS4 PKG library manager \u2014 scan, organise, rename and transfer .pkg files",
+  "main": "main.js",
+  "author": {
+    "name": "Nookie",
+    "email": "your@email.com"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis",
+    "build:all": "electron-builder --win --mac --linux"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.5"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ps4vault.app",
+    "productName": "PS4 Vault",
+    "copyright": "Copyright \u00a9 2026 PS4 Vault",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "${productName}-${version}-portable.exe"
+    },
+    "portable": {
+      "requestExecutionLevel": "user",
+      "artifactName": "${productName}-${version}-portable.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "${productName}-${version}-setup.exe",
+      "shortcutName": "PS4 Vault",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility",
+      "icon": "assets/icon.png"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "extraMetadata": {
+      "main": "main.js"
+    },
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ]
+  }
+}

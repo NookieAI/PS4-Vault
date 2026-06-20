@@ -1,0 +1,22 @@
+# dependencies — reinstalled with `npm ci`, never committed
+node_modules/
+
+# build output
+dist/
+out/
+
+# PS4/PS5 game packages — never commit game files
+*.pkg
+*.pkg.part
+
+# on-console data dumps
+/192.168.137.100/
+
+# signing / scratch / archives
+sign.pfx
+*.zip
+_HANDOVER_AUDIT.md
+
+# logs
+*.log
+*.log.bak
