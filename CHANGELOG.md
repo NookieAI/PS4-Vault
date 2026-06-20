@@ -2,6 +2,18 @@
 
 ---
 
+## Version 1.1.1
+
+### CI / Release
+- macOS releases now ship **both** Apple Silicon (`-arm64.dmg`) and **Intel (`-x64.dmg`)**
+  builds, so Intel Macs are covered.
+- Removed the unused "Autobuild Linux & macOS" workflow stub (it ran `make` on every push
+  and always failed — it never applied to this Electron app).
+
+No application code changes from v1.1.0.
+
+---
+
 ## Version 1.1.0
 
 Brings PS4 Vault up to parity with the hardening done in PS5 Vault.
