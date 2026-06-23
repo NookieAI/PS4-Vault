@@ -2,6 +2,35 @@
 
 ---
 
+## Version 1.1.3
+
+### Security / Hardening
+- **Saved console/FTP passwords are now encrypted at rest.** Console profiles and the
+  last-used password were previously stored in plaintext in `localStorage`. They are now
+  encrypted via the OS keystore (Electron `safeStorage`) and decrypted only in memory.
+  Existing plaintext entries still load and are re-encrypted on next save; if the OS
+  keystore is unavailable it falls back to the old behaviour, so autofill never breaks.
+- **Window hardening** — `window.open` is denied, navigation away from the local app is
+  blocked, and the renderer now runs with `sandbox: true` (on top of the existing
+  `contextIsolation` + strict CSP).
+- **CSP tightened** with explicit `object-src 'none'`, `base-uri 'self'`, and
+  `frame-ancestors 'none'`.
+
+### Fixed (FTP transfer robustness)
+- **A second network install no longer cuts off the first.** The 5-minute post-install
+  PKG-server teardown timer is now cancellable and removes only its own firewall rule for
+  the exact port — previously a stale timer + wildcard rule deletion could tear down a
+  concurrent install's live server and firewall hole.
+- **A single dropped upload no longer fails the whole batch.** On an FTP upload failure the
+  shared destination connection is reset, so the next file reconnects instead of erroring
+  on a dead socket.
+- **FTP scan-pool reconnects no longer leak a socket** — a reconnected pool client is now
+  tracked so it's closed cleanly, and reconnect failures are logged.
+
+Found by a follow-up concurrency / Electron-hardening audit sweep.
+
+---
+
 ## Version 1.1.2
 
 ### Security

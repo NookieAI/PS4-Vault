@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu, safeStorage } = require('electron');
 const http   = require('http');
 const path   = require('path');
 const fs     = require('fs');
@@ -120,8 +120,16 @@ function createWindow() {
       preload:          path.join(__dirname, 'preload.js'),
       nodeIntegration:  false,
       contextIsolation: true,
+      sandbox:          true,
       devTools:         false,
     },
+  });
+
+  // Hardening: this is a local file:// app that never legitimately opens child windows
+  // or navigates away from index.html. Deny window.open and block any non-file navigation.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -1156,9 +1164,15 @@ async function withFtpPool(cfg, pkgList, signal, onItem) {
       idx++;
       try { await onItem(client, item, idx); }
       catch (e) { console.warn('[ftp-pool] worker error, reconnecting:', e.message); }
-      // If the client dropped, reconnect it once before continuing
+      // If the client dropped, reconnect it once before continuing — and write the new
+      // handle back into pool[] so the finally below closes the LIVE client, not the
+      // stale one (otherwise the reconnected socket leaks until idle-timeout).
       if (!client.closed) continue;
-      try { client = await makeFtpClient(cfg); } catch (e2) { break; }
+      try {
+        const slot = pool.indexOf(client);
+        client = await makeFtpClient(cfg);
+        if (slot >= 0) pool[slot] = client;
+      } catch (e2) { console.warn('[ftp-pool] reconnect failed, worker stopping:', e2.message); break; }
     }
   }
 
@@ -1713,14 +1727,22 @@ async function _runGoPkgs(sender, items, destDir, action, layout, renameFormat, 
 
         } else if (!isFtpSrc && ftpDest) {
           // Local → FTP
-          const ftpClient = await getDestFtp();
-          const remoteDir = destPath.substring(0, destPath.lastIndexOf('/'));
-          if (remoteDir) { try { await ftpClient.ensureDir(remoteDir); } catch (_) {} }
-          ftpClient.trackProgress(info => {
-            sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize, ts: Date.now() });
-          });
-          await ftpClient.uploadFrom(item.filePath, destPath);
-          ftpClient.trackProgress();
+          try {
+            const ftpClient = await getDestFtp();
+            const remoteDir = destPath.substring(0, destPath.lastIndexOf('/'));
+            if (remoteDir) { try { await ftpClient.ensureDir(remoteDir); } catch (_) {} }
+            ftpClient.trackProgress(info => {
+              sender.send('go-progress', { type: 'go-file-progress', bytesCopied: info.bytes, totalBytes: item.fileSize, ts: Date.now() });
+            });
+            await ftpClient.uploadFrom(item.filePath, destPath);
+            ftpClient.trackProgress();
+          } catch (e) {
+            // The shared upload connection may have dropped — reset it so the next item
+            // reconnects instead of failing the whole remaining batch on a dead socket.
+            try { destFtpClient?.close(); } catch (_) {}
+            destFtpClient = null;
+            throw e;
+          }
 
         } else if (isFtpSrc && ftpDest) {
           // FTP → FTP: relay via temp file
@@ -1739,6 +1761,12 @@ async function _runGoPkgs(sender, items, destDir, action, layout, renameFormat, 
             const remDir   = destPath.substring(0, destPath.lastIndexOf('/'));
             if (remDir) { try { await ulClient.ensureDir(remDir); } catch (_) {} }
             await ulClient.uploadFrom(tmpPath, destPath);
+          } catch (e) {
+            // Reset the shared upload client on failure so a dropped connection doesn't
+            // fail every remaining relay item.
+            try { destFtpClient?.close(); } catch (_) {}
+            destFtpClient = null;
+            throw e;
           } finally { fs.promises.unlink(tmpPath).catch(() => {}); }
 
         } else {
@@ -1886,6 +1914,28 @@ ipcMain.handle('load-library', async () => {
     if (e && e.code !== 'ENOENT') console.error('[library] load failed:', e.message);
     return { ok: false, items: [] };
   }
+});
+
+// ── safeStorage: encrypt/decrypt secrets (saved FTP/console passwords) at rest ─
+// The renderer keeps console profiles + the last-used password in localStorage; the
+// password field is encrypted here so it never sits in plaintext on disk. Backward-
+// compatible: a value without the 'v1:' marker is treated as legacy plaintext and
+// returned as-is, and if OS-level encryption is unavailable we fall back to plaintext.
+ipcMain.handle('secret-encrypt', (_e, plain) => {
+  try {
+    if (plain && safeStorage.isEncryptionAvailable()) {
+      return 'v1:' + safeStorage.encryptString(String(plain)).toString('base64');
+    }
+  } catch (_) {}
+  return plain == null ? '' : String(plain);
+});
+ipcMain.handle('secret-decrypt', (_e, stored) => {
+  try {
+    if (typeof stored === 'string' && stored.startsWith('v1:')) {
+      return safeStorage.decryptString(Buffer.from(stored.slice(3), 'base64'));
+    }
+  } catch (_) {}
+  return typeof stored === 'string' ? stored : '';
 });
 
 // Rehydrate covers from the on-disk cache by key (contentId / fileName / filePath), so the
@@ -2148,6 +2198,7 @@ ipcMain.handle('test-ps4-conn', async (_e, ps4Ip, ps4Port) => {
 let pkgServer        = null;
 let pkgServerPort    = 0;
 let pkgServerNonce   = '';        // unguessable per-session token, required on every request
+let pkgServerTeardownTimer = null; // 5-min post-install teardown timer; cancelled if a new install starts
 let pkgFileMap       = new Map(); // b64key → absolute local path
 let pkgServerLastHit     = null;
 let pkgServerActiveConns = 0;
@@ -2373,6 +2424,9 @@ async function startPkgServer(port, items) {
 }
 
 function stopPkgServer() {
+  // Cancel any pending post-install teardown so a stale timer can't tear down a NEW
+  // install's live server + firewall rule (startPkgServer awaits this first).
+  if (pkgServerTeardownTimer) { clearTimeout(pkgServerTeardownTimer); pkgServerTeardownTimer = null; }
   return new Promise(resolve => {
     if (!pkgServer) { resolve(); return; }
     const s = pkgServer; pkgServer = null;
@@ -2728,16 +2782,22 @@ async function _runRemoteInstall(sender, items, ps4Ip, ps4Port, serverPort, inst
       }
     }
   } finally {
-    // Keep server alive 5 min — PS4 may still be transferring
-    setTimeout(() => {
+    // Keep server alive 5 min — PS4 may still be transferring. Store the timer so a
+    // subsequent install (via stopPkgServer/startPkgServer) cancels it; otherwise a
+    // stale timer would tear down the NEW install's live server + firewall rule.
+    const teardownPort = serverPort;
+    if (pkgServerTeardownTimer) clearTimeout(pkgServerTeardownTimer);
+    pkgServerTeardownTimer = setTimeout(() => {
+      pkgServerTeardownTimer = null;
       stopPkgServer();
       console.log('[pkg-server] stopped');
-      // Remove ONLY the scoped inbound rule(s) we added for the PKG server — never touch
-      // firewall profile defaults. (A previous version forced DefaultInboundAction, which
-      // changed the user's global policy rather than restoring it.)
+      // Remove ONLY the exact scoped inbound rule we added for THIS port — never a
+      // wildcard (which would also delete a concurrent install's rule) and never the
+      // firewall profile defaults.
       if (process.platform === 'win32') {
         const { exec } = require('child_process');
-        exec(`powershell -NoProfile -NonInteractive -Command "Remove-NetFirewallRule -DisplayName 'PS4Vault-PKGServer-*' -ErrorAction SilentlyContinue"`,
+        const ruleName = `PS4Vault-PKGServer-${teardownPort}`;
+        exec(`powershell -NoProfile -NonInteractive -Command "Remove-NetFirewallRule -DisplayName '${ruleName}' -ErrorAction SilentlyContinue"`,
           { windowsHide: true, timeout: 8000 },
           (err) => { if (!err) console.log('[pkg-server] firewall rule removed'); }
         );

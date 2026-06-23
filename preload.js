@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('pkgApi', {
   showInFolder:        (p)                              => ipcRenderer.invoke('show-in-folder', p),
   openExternal:        (url)                            => ipcRenderer.invoke('open-external', url),
   copyToClipboard:     (text)                           => ipcRenderer.invoke('clipboard-write', text),
+
+  // ── Secrets (FTP/console password encryption at rest, via OS safeStorage) ────
+  encryptSecret:       (s)                              => ipcRenderer.invoke('secret-encrypt', s),
+  decryptSecret:       (s)                              => ipcRenderer.invoke('secret-decrypt', s),
+
   getAllDrives:         ()                               => ipcRenderer.invoke('get-all-drives'),
   getLogoDataUrl:      ()                               => ipcRenderer.invoke('get-logo-data-url'),
 

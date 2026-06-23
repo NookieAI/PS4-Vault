@@ -121,8 +121,38 @@
   }
 
   // ── Feature 13: Console profiles ─────────────────────────────────────────────
-  function getProfiles()        { try { return JSON.parse(localStorage.getItem(K_CS_PROFILES) || '[]'); } catch { return []; } }
-  function saveProfiles(arr)    { localStorage.setItem(K_CS_PROFILES, JSON.stringify(arr)); }
+  // Password encryption at rest (see main.js safeStorage handlers). Falls back to the
+  // raw value if the API is unavailable, so it can never break autofill.
+  async function encryptSecret(s) {
+    try { return (window.pkgApi && window.pkgApi.encryptSecret) ? await window.pkgApi.encryptSecret(s) : s; } catch (_) { return s; }
+  }
+  async function decryptSecret(s) {
+    try { return (window.pkgApi && window.pkgApi.decryptSecret) ? await window.pkgApi.decryptSecret(s) : s; } catch (_) { return s; }
+  }
+  // In-memory caches with DECRYPTED passwords. localStorage holds the encrypted form; we
+  // decrypt once on load so the synchronous profile/modal reads stay simple, and re-encrypt
+  // in the background on save. Names/hosts/ports are never encrypted.
+  let _profilesCache = null;
+  let _csPassCache    = null;
+  (async function initCsSecrets() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(K_CS_PROFILES) || '[]');
+      _profilesCache = await Promise.all(raw.map(async p => ({ ...p, pass: p.pass ? await decryptSecret(p.pass) : (p.pass || '') })));
+      refreshConsoleProfiles();
+    } catch { _profilesCache = []; }
+    try { _csPassCache = await decryptSecret(localStorage.getItem('ps4pkgvault.csPass') || ''); } catch { _csPassCache = ''; }
+  })();
+
+  function getProfiles() {
+    if (_profilesCache) return _profilesCache;
+    try { return JSON.parse(localStorage.getItem(K_CS_PROFILES) || '[]'); } catch { return []; }
+  }
+  function saveProfiles(arr) {
+    _profilesCache = arr; // in-memory plaintext (autofill); persist encrypted in background
+    Promise.all(arr.map(async p => ({ ...p, pass: p.pass ? await encryptSecret(p.pass) : (p.pass || '') })))
+      .then(enc => localStorage.setItem(K_CS_PROFILES, JSON.stringify(enc)))
+      .catch(() => {});
+  }
   function refreshConsoleProfiles() {
     const sel = $('csProfiles'); if (!sel) return;
     const profiles = getProfiles();
@@ -600,7 +630,7 @@
     $('csHost').value       = prefill?.host     || localStorage.getItem('ps4pkgvault.csHost')     || '';
     $('csFtpPort').value    = prefill?.port     || localStorage.getItem('ps4pkgvault.csFtpPort')  || '2121';
     $('csUser').value       = prefill?.user     || localStorage.getItem('ps4pkgvault.csUser')     || 'anonymous';
-    $('csPass').value       = prefill?.pass     || localStorage.getItem('ps4pkgvault.csPass')     || '';
+    $('csPass').value       = prefill?.pass     || _csPassCache                                   || '';
     $('csPkgPath').value    = prefill?.path     || localStorage.getItem('ps4pkgvault.csPkgPath')  || '/';
     if ($('csFtpMode')) $('csFtpMode').value = prefill?.ftpMode || localStorage.getItem('ps4pkgvault.csFtpMode') || 'passive';
     csStatus(prefill ? `${prefill.consoleType||'Console'} found at ${prefill.host} — ready to scan` : '', '#4ade80');
@@ -647,7 +677,7 @@
     localStorage.setItem('ps4pkgvault.csFtpPort', String(cfg.port||2121));
     if(cfg.path)    localStorage.setItem('ps4pkgvault.csPkgPath',  cfg.path);
     if(cfg.user)    localStorage.setItem('ps4pkgvault.csUser',     cfg.user);
-    if(cfg.pass     !== undefined) localStorage.setItem('ps4pkgvault.csPass', cfg.pass);
+    if(cfg.pass     !== undefined) { _csPassCache = cfg.pass; encryptSecret(cfg.pass).then(enc => localStorage.setItem('ps4pkgvault.csPass', enc)).catch(()=>{}); }
     if(cfg.ftpMode) localStorage.setItem('ps4pkgvault.csFtpMode',  cfg.ftpMode);
     localStorage.setItem('ps4vault.installPs4Ip', cfg.host);
     addRecent(K_RECENT_FTP, cfg.host); refreshAll();
