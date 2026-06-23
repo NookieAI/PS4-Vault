@@ -209,6 +209,11 @@
   function escHtml(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function escAttr(s) { return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
   function escJs(s)   { return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+  // For a value placed inside a JS string literal that is itself inside a DOUBLE-QUOTED
+  // HTML attribute (e.g. onclick="fn('${...}')"): JS-escape (\ ') THEN attribute-escape
+  // (& "), so a double-quote in the value — e.g. a hostile FTP filename from client.list —
+  // cannot close the attribute and inject an event handler (XSS).
+  function escJsAttr(s) { return escAttr(escJs(s)); }
   // Render a cover value as an <img> src. Cached covers are filesystem paths → file://
   // URLs (CSP allows file:; a bare "C:\..." would be parsed as a "c:" scheme and blocked).
   // data:/blob:/http(s) values pass through unchanged.
@@ -283,7 +288,7 @@
     const regCls    = regionColor(item.region);
     const isPartial = !!item.isPartial;
     const iconHtml  = item.iconPath
-      ? `<img class="thumb" src="${coverSrc(item.iconPath)}" alt="cover" loading="eager" onmouseover="showPreview(event,this.src,'${escJs(item.filePath)}')" onmouseout="hidePreview()">`
+      ? `<img class="thumb" src="${coverSrc(item.iconPath)}" alt="cover" loading="eager" onmouseover="showPreview(event,this.src,'${escJsAttr(item.filePath)}')" onmouseout="hidePreview()">`
       : item.isInstalled ? makeInstalledPlaceholderSvg()
       : isPartial       ? makePartialPlaceholderSvg()
       : makePlaceholderSvg();
@@ -298,7 +303,7 @@
     const ftpBadge  = item.isFtp&&!item.isInstalled ? ' <span class="ftp-badge">FTP</span>' : '';
     const instBadge = item.isInstalled ? ' <span class="installed-badge">INSTALLED</span>' : '';
     const partBadge = isPartial ? ' <span class="partial-badge" title="Incomplete download — .pkg.part file">⚠ PARTIAL</span>' : '';
-    const actionsHtml = `<button class=\"row-btn\" title=\"Show in folder\" onclick=\"pkgApi.showInFolder('${escJs(item.filePath)}')\"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>`;
+    const actionsHtml = `<button class=\"row-btn\" title=\"Show in folder\" onclick=\"pkgApi.showInFolder('${escJsAttr(item.filePath)}')\"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>`;
     const sizeDisp = (item.isInstalled && !item.fileSize)
       ? '<span style="color:var(--muted);font-size:11px">on console</span>'
       : isPartial
@@ -311,7 +316,7 @@
       <td class="title-cell">
         <div class="title-main"><span class="title-name ${titleQuality}">${displayName}</span>${dupBadge}${ftpBadge}${instBadge}${partBadge}</div>
         ${cusaLine}${pathLine}
-        ${item.isInstalled||isPartial?'':`<div class="title-sub pkg-filename" title="${escHtml(item.filePath)}" onclick="startRenameInline(event,'${escJs(item.filePath)}')">${escHtml(item.fileName)}</div>`}
+        ${item.isInstalled||isPartial?'':`<div class="title-sub pkg-filename" title="${escHtml(item.filePath)}" onclick="startRenameInline(event,'${escJsAttr(item.filePath)}')">${escHtml(item.fileName)}</div>`}
       </td>
       <td><span class="cat-badge ${catCls}">${catDisp}</span></td>
       <td class="mono-col">${escHtml(item.appVer||'—')}</td>
@@ -391,7 +396,7 @@
       const cover  = item.iconPath
         ? `<img src="${coverSrc(item.iconPath)}" alt="cover" loading="eager" onmouseover="showPreview(event,this.src,this.closest('.grid-card').dataset.fp)" onmouseout="hidePreview()">`
         : item.isPartial ? makePartialPlaceholderSvg() : makePlaceholderSvg();
-      return `<div class="grid-card${sel?' selected':''}${item.isPartial?' partial':''}" data-fp="${escAttr(item.filePath)}" oncontextmenu="event.preventDefault();showCtxMenu(event.clientX,event.clientY,'${escJs(item.filePath)}')">
+      return `<div class="grid-card${sel?' selected':''}${item.isPartial?' partial':''}" data-fp="${escAttr(item.filePath)}" oncontextmenu="event.preventDefault();showCtxMenu(event.clientX,event.clientY,'${escJsAttr(item.filePath)}')">
         <div class="gc-check"></div>
         <div class="gc-cover">${cover}</div>
         <div class="gc-body">

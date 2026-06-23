@@ -32,7 +32,9 @@ console.log   = (...a) => { _origLog(...a);  if (_logStream) _logStream.write(`$
 console.warn  = (...a) => { _origWarn(...a); if (_logStream) _logStream.write(`${_ts()} WARN  ${a.join(' ')}\n`); };
 console.error = (...a) => { _origErr(...a);  if (_logStream) _logStream.write(`${_ts()} ERROR ${a.join(' ')}\n`); };
 
-const VERSION        = '1.0.6';
+// Single source of truth — read from package.json so the displayed version, the log
+// header, and the updater's "current version" never drift from the released build.
+const VERSION        = app.getVersion();
 // initLog() called after app.whenReady — see below
 const SCAN_CONCURR   = 16;
 const MAX_SCAN_DEPTH = 10;
@@ -1561,6 +1563,15 @@ ipcMain.handle('ftp-test-conn', async (_e, cfg) => {
 ipcMain.handle('delete-pkgs', async (_event, items) => {
   const results = [];
   for (const item of items) {
+    // Trust-boundary guard: only ever delete PKG files (.pkg / .part), never a
+    // caller-supplied arbitrary path. Defense-in-depth so a compromised renderer can't
+    // unlink/remove system files (rename-pkg has equivalent containment guards).
+    const fp = item && item.filePath;
+    const lc = String(fp || '').toLowerCase();
+    if (!fp || !(lc.endsWith('.pkg') || lc.endsWith('.part'))) {
+      results.push({ filePath: fp || null, ok: false, error: 'Refused: not a .pkg/.part path' });
+      continue;
+    }
     if (item.isFtp) {
       // FTP delete
       let client;
@@ -1572,6 +1583,7 @@ ipcMain.handle('delete-pkgs', async (_event, items) => {
         results.push({ filePath: item.filePath, ok: false, error: e.message });
       } finally { try { client?.close(); } catch (_) {} }
     } else {
+      if (!path.isAbsolute(fp)) { results.push({ filePath: fp, ok: false, error: 'Refused: path is not absolute' }); continue; }
       try   { await fs.promises.unlink(item.filePath); results.push({ filePath: item.filePath, ok: true }); }
       catch (e) { results.push({ filePath: item.filePath, ok: false, error: e.message }); }
     }
@@ -2135,6 +2147,7 @@ ipcMain.handle('test-ps4-conn', async (_e, ps4Ip, ps4Port) => {
 
 let pkgServer        = null;
 let pkgServerPort    = 0;
+let pkgServerNonce   = '';        // unguessable per-session token, required on every request
 let pkgFileMap       = new Map(); // b64key → absolute local path
 let pkgServerLastHit     = null;
 let pkgServerActiveConns = 0;
@@ -2154,6 +2167,9 @@ async function startPkgServer(port, items) {
   pkgServerSpeedBuf    = [];
   pkgServerSpeedLast   = 0;
   pkgServerXferStart   = 0;
+  // Unguessable per-session token: the console must present it on every request, so a
+  // random host on the LAN can't pull a queued PKG during the install window.
+  pkgServerNonce       = crypto.randomBytes(16).toString('hex');
 
   // Register each item under a b64 key, exactly as DPI does with /file/?b64=
   for (const item of items) {
@@ -2178,6 +2194,15 @@ async function startPkgServer(port, items) {
         const b64Raw  = b64Match ? b64Match[1].split('?')[0] : '';
         // Decode %XX encoding but leave + as-is (we use base64url so no + expected)
         const b64     = decodeURIComponent(b64Raw);
+        // Require the per-session nonce — reject any request that doesn't carry it, so the
+        // LAN-bound server only serves the console we handed the URL to.
+        const nMatch  = query.match(/(?:^|&)n=([^&]*)/);
+        const nonce   = nMatch ? nMatch[1].split('?')[0] : '';
+        if (pkgServerNonce && nonce !== pkgServerNonce) {
+          console.warn('[pkg-server] 403 (bad/missing nonce) from', req.socket.remoteAddress);
+          res.writeHead(403); res.end('Forbidden');
+          return;
+        }
         const fpath   = b64 ? pkgFileMap.get(b64) : null;
 
         if (!fpath) {
@@ -2315,11 +2340,13 @@ async function startPkgServer(port, items) {
       if (process.platform === 'win32') {
         const { exec } = require('child_process');
         const ruleName = `PS4Vault-PKGServer-${port}`;
+        // SECURITY: only add a scoped inbound ALLOW rule for THIS port. Never touch the
+        // firewall profile defaults — a previous version set DefaultInboundAction=Allow on
+        // all profiles, which disabled inbound firewalling machine-wide for every install.
+        // The per-port rule below is sufficient for the console to reach the PKG server.
         const psCmd = [
           `Remove-NetFirewallRule -DisplayName '${ruleName}' -ErrorAction SilentlyContinue`,
           `New-NetFirewallRule -DisplayName '${ruleName}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${port} -Profile Any`,
-          `Set-NetFirewallProfile -Profile Domain,Private,Public -AllowInboundRules True`,
-          `Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Allow`,
         ].join('; ');
 
         // Run PowerShell async — UI stays fully responsive during firewall setup
@@ -2580,7 +2607,7 @@ async function _runRemoteInstall(sender, items, ps4Ip, ps4Port, serverPort, inst
 
       // Build URL in DPI format: http://PCIP:PORT/file/?b64=BASE64(localFilePath)
       const b64    = item._b64key || Buffer.from(item.filePath).toString('base64url');
-      const pkgUrl = `http://${localIp}:${serverPort}/file/?b64=${b64}`;
+      const pkgUrl = `http://${localIp}:${serverPort}/file/?b64=${b64}&n=${pkgServerNonce}`;
 
       sender.send('install-progress', {
         type: 'install-file-start', file: item.fileName,
@@ -2705,12 +2732,14 @@ async function _runRemoteInstall(sender, items, ps4Ip, ps4Port, serverPort, inst
     setTimeout(() => {
       stopPkgServer();
       console.log('[pkg-server] stopped');
-      // Restore firewall — async so it never blocks anything
+      // Remove ONLY the scoped inbound rule(s) we added for the PKG server — never touch
+      // firewall profile defaults. (A previous version forced DefaultInboundAction, which
+      // changed the user's global policy rather than restoring it.)
       if (process.platform === 'win32') {
         const { exec } = require('child_process');
-        exec(`powershell -NoProfile -NonInteractive -Command "Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block"`,
+        exec(`powershell -NoProfile -NonInteractive -Command "Remove-NetFirewallRule -DisplayName 'PS4Vault-PKGServer-*' -ErrorAction SilentlyContinue"`,
           { windowsHide: true, timeout: 8000 },
-          (err) => { if (!err) console.log('[install] Firewall DefaultInboundAction restored'); }
+          (err) => { if (!err) console.log('[pkg-server] firewall rule removed'); }
         );
       }
     }, 300000);

@@ -2,6 +2,28 @@
 
 ---
 
+## Version 1.1.2
+
+### Security
+- **Network PKG install no longer disables the Windows Firewall machine-wide.** It used to
+  set `DefaultInboundAction=Allow` on all firewall profiles for every install (restored only
+  by a 5-minute timer — closing the app within that window left the machine open). It now
+  adds a single scoped inbound rule for the PKG-server port and removes it on teardown.
+- **The local PKG server now requires an unguessable per-session token** on every request,
+  so another host on the LAN can't pull a queued PKG during the install window.
+- **Fixed a renderer XSS.** A malicious FTP server returning a filename containing a double
+  quote could break out of an event-handler attribute and inject script (the JS escaper
+  didn't escape `"`). Filenames in inline handlers are now JS- *and* attribute-escaped.
+- **`delete-pkgs` hardened** — it now refuses any path that isn't an absolute `.pkg`/`.part`
+  file (defense-in-depth, matching the existing `rename-pkg` guards).
+
+### Fixed
+- **Correct version is shown.** The in-app version was hardcoded and stuck at `1.0.6` while
+  the build was `1.1.x`, which also made the auto-updater offer a redundant "update". The
+  version is now read from `package.json`, so the title, log, and updater stay in sync.
+
+---
+
 ## Version 1.1.1
 
 ### CI / Release
